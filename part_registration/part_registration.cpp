@@ -730,7 +730,8 @@ int
   //——————————————————————————————————————————————————————	
   //读取输入的两个点云
   read_pointcloud(source_point_cloud, target_point_cloud, argc, argv);
-
+  string pc1name = argv[1];
+  string pc2name = argv[2];
   if (source_point_cloud->points.size() > 50000)
 	  DownSample(source_point_cloud);
   if (target_point_cloud->points.size() > 50000)
@@ -816,7 +817,15 @@ int
 
 	  // 分割点云
 	  SegmentCloud(source_point_cloud, NewSourceCloud[i], NewSourceCloudIndex[i], source_sampleIndex[i], seg_nums, K);
-	  SegmentCloud(target_point_cloud, NewTargetCloud[i], NewTargetCloudIndex[i], target_sampleIndex[i], seg_nums, K);
+	  //——————————————————————————————————————————————————————
+	  //实验一图
+	  /*
+	  target_sampleIndex[i] = source_sampleIndex[i];
+	  NewTargetCloudIndex[i] = NewSourceCloudIndex[i];
+	  NewTargetCloud[i] = NewSourceCloud[i];
+	  */
+	  //——————————————————————————————————————————————————————
+	 SegmentCloud(target_point_cloud, NewTargetCloud[i], NewTargetCloudIndex[i], target_sampleIndex[i], seg_nums, K);
   }
   clock_t segment_end = clock();
   cout << "分割且结束,用时:" << (double)(segment_end - segment_start) / (double)CLOCKS_PER_SEC << " s" << endl;
@@ -865,7 +874,7 @@ int
 			   //cout << "开始ransac source点云的" << i << "部分和target点云的" << j << "部分,使用的线程为:" << omp_get_thread_num() << endl;
 			   Ransac_registration(NewSourceCloud[i].makeShared(), NewTargetCloud[j].makeShared(), TR_vector[i*seg_nums + j], rms_vector[i*seg_nums + j]);
 			   PointRegionPair[i*seg_nums + j] = { i,j };
-			   cout << "已ransac source点云的" << i << "部分和target点云的" << j << "部分,使用的线程为:"<< omp_get_thread_num() << endl;
+			   cout << "已ransac source点云的" << i << "部分和target点云的" << j << "部分,rms值为"<<rms_vector[i*seg_nums + j]<<"。使用的线程为:"<< omp_get_thread_num() << endl;
 		   }
 	   }
   clock_t ransac_end = clock();
@@ -971,6 +980,14 @@ int
   //pcl::visualization::PointCloudColorHandlerCustom<pcl::PointXYZRGBA> targetPairRegion_cloud_color_handler(pc2PairRegion, 250, 0, 0);//深红
   viewer->addPointCloud(target_point_cloud, "target_point_cloud");
   viewer->addPointCloud(pc2PairRegion, best_targetPairRegion_cloud_color_handler, "targetPairRegion_cloud");
+  //——————————————————————————————————————————————————————
+  //保存旋转矩阵
+  string origin_transform_matrix_filepath = pc1name.substr(0, pc1name.size() - 4) + "_part" + to_string(pc1) + "_" + pc2name.substr(0, pc2name.size() - 4) + "_part" + to_string(pc2) + ".txt";
+  std::ofstream  origin;
+  origin.open(origin_transform_matrix_filepath, std::ios::app);//在文件末尾追加写入
+  origin << finaltransformation << std::endl;//每次写完一个矩阵以后换行
+  origin.close();
+  //——————————————————————————————————————————————————————
   cout << "如不满意，按Enter手动进行区块选择" << endl;
   //检测键盘输入
   int ch = 0;//检测键盘输入键值
@@ -1029,11 +1046,11 @@ int
 	  viewer5->addPointCloud(source_point_cloud, "source_point_cloud", v1);
 	  viewer5->addPointCloud(target_point_cloud, "target_point_cloud", v2);
 	  pcl::visualization::PointCloudColorHandlerCustom<pcl::PointXYZRGBA> manual_sourcePairRegion_cloud_color_handler(NewSourceCloud[sourcepartnum].makeShared(), r[sourcepartnum], g[sourcepartnum], b[sourcepartnum]);//蓝色
-	  viewer5->addPointCloud(NewSourceCloud[sourcepartnum].makeShared(), sourcePairRegion_cloud_color_handler, "sourcePairRegion", v1);
+	  viewer5->addPointCloud(NewSourceCloud[sourcepartnum].makeShared(), manual_sourcePairRegion_cloud_color_handler, "sourcePairRegion", v1);
 	  viewer5->addText("seg_source_point_cloud_image,total " + to_string(seg_nums) + "parts", 10, 10, 1.0, 0.0, 0.0, "v1 text", v1);
 	  viewer5->addText("select part" + sourcepart, 10, 30, r[sourcepartnum] / 255, g[sourcepartnum] / 255, b[sourcepartnum] / 255, "v1 select text", v1);
 	  pcl::visualization::PointCloudColorHandlerCustom<pcl::PointXYZRGBA> manual_targetPairRegion_cloud_color_handler(NewTargetCloud[targetpartnum].makeShared(), r[targetpartnum], g[targetpartnum], b[targetpartnum]);//黄色
-	  viewer5->addPointCloud(NewTargetCloud[targetpartnum].makeShared(), targetPairRegion_cloud_color_handler, "targetPairRegion", v2);
+	  viewer5->addPointCloud(NewTargetCloud[targetpartnum].makeShared(), manual_targetPairRegion_cloud_color_handler, "targetPairRegion", v2);
 	  viewer5->addText("seg_target_point_cloud_image,total " + to_string(seg_nums) + "parts", 10, 10, 1.0, 0.0, 0.0, "v2 text", v2);
 	  viewer5->addText("select part" + targetpart, 10, 30, r[targetpartnum] / 255, g[targetpartnum] / 255, b[targetpartnum] / 255, "v2 select text", v2);
 	  viewer5->spinOnce(100);
@@ -1085,6 +1102,13 @@ int
 	  viewer6->addPointCloud(target_point_cloud, "target_point_cloud");
 	  viewer6->addPointCloud(manual_PairRegion2, manual_targetPairRegion_resultcloud_color_handler, "manual_PairRegion2_cloud");
  
+	  //——————————————————————————————————————————————————————
+	  //保存旋转矩阵
+	  string transform_matrix_filepath = pc1name.substr(0,pc1name.size()-4)+"_part"+ sourcepart+"_"+ pc2name.substr(0, pc2name.size() - 4) + "_part" + targetpart+ ".txt";
+	  std::ofstream fout;
+	  fout.open(transform_matrix_filepath, std::ios::app);//在文件末尾追加写入
+	  fout << manual_finaltransformation << std::endl;//每次写完一个矩阵以后换行
+	  fout.close();
 	  //——————————————————————————————————————————————————————
 	  int ch = 0;//检测键盘输入键值
 	  cout << "如不满意，按Enter手动进行区块选择" << endl;
