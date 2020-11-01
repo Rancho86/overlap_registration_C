@@ -603,12 +603,6 @@ int ComputerRelativeTR_Threshold(const vector<double> rms_vector, const vector<E
 		//保存rms最小值的索引
 		rms_min_index.push_back(rms_copy_index[Min_Index]);
 
-		// 测试
-		cout << "rms_Min:" << rms_Min << endl;
-		//cout << "Min_Index:" << Min_Index << endl;
-		cout << "rms_copy_index:" << rms_copy_index[Min_Index] << endl;
-		cout << "rms_min_index:" << rms_min_index[i] << endl;
-
 		// 将目前的最小值删除
 		vector<double>::iterator iter1 = rms_copy.begin() + Min_Index;
 		rms_copy.erase(iter1);
