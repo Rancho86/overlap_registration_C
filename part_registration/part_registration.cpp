@@ -698,12 +698,14 @@ int
 {
 //——————————————————————————————————————————————————————	
 	//手动设置参数区
-	int seg_nums = 6;         // 切割点云的数量，默认是11
-	if (argc >= 4)
-		seg_nums = atoi(argv[3]);
 	double overlap = 0.4;     //重叠区域大小
 	if(argc>=5)
 		overlap = atof(argv[4]);
+	int seg_nums = floor(1/overlap*5);         // 切割点云的数量，默认是11
+	cout << "根据重叠区域比例推荐使用分块数量为" << seg_nums << endl;
+	if (argc >= 4)
+		seg_nums = max(seg_nums,atoi(argv[3]));
+	cout << "最终使用分块数量为" << seg_nums << endl;
 	double K_factor = overlap*seg_nums;     //分割的时候需要设置的影响因子，决定Kd树的大小
 	int sac_times = 500;        //SAC最大迭代次数
 	double thresh = 0.001;      //SAC筛选点的距离阈值
@@ -797,7 +799,7 @@ int
   vector<vector<int>> NewSourceCloudIndex(seg_nums);
   vector<vector<int>> NewTargetCloudIndex(seg_nums);
   vector<vector<int>> PointRegionPair(seg_nums*seg_nums);
-  int K = (int)(source_point_cloud->points.size() / seg_nums * K_factor); //每块含有的点云数量
+  int K = (int)(max(source_point_cloud->points.size(),target_point_cloud->points.size())/ seg_nums * K_factor); //每块含有的点云数量
   cout << "每块包含点云的数量:"<<K << endl; //这个数量其实是overlap区域点云数量
 
   //红,橙,黄,绿,青,蓝,紫,深红,深橙,金，橄榄绿
