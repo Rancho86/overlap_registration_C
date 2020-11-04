@@ -39,8 +39,8 @@ using namespace std;
 
 void printUsage(const char* progName)
 {
-	cout << "先输入两个点云名字，再加一个方法数字0是手动，1是sac_icp,不输入默认为0" << endl;
-	cout << "例子："<<progName<<" source_point_cloud.pcd/obj/ply target_point_cloud.pcd/obj/ply 1" << endl;
+	cout << "先输入两个点云名字，再加一个整数代表分块数量，再加一个小数代表overlap区域占比" << endl;
+	cout << "例子："<<progName<<" source_point_cloud.pcd/obj/ply target_point_cloud.pcd/obj/ply 8 0.4" << endl;
 	cout << "测试版本" << endl;
 }
 
@@ -701,9 +701,10 @@ int
 	int seg_nums = 6;         // 切割点云的数量，默认是11
 	if (argc >= 4)
 		seg_nums = atoi(argv[3]);
-	double K_factor = 2;     //分割的时候需要设置的影响因子，决定Kd树的大小
+	double overlap = 0.4;     //重叠区域大小
 	if(argc>=5)
-		K_factor = atof(argv[4]);
+		overlap = atof(argv[4]);
+	double K_factor = overlap*seg_nums;     //分割的时候需要设置的影响因子，决定Kd树的大小
 	int sac_times = 500;        //SAC最大迭代次数
 	double thresh = 0.001;      //SAC筛选点的距离阈值
 	//int threads_num = min(omp_get_max_threads(), seg_nums);
@@ -743,24 +744,26 @@ int
   int v1(0);
   int v2(0);
   //source点云视角
+  pcl::visualization::PointCloudColorHandlerCustom<pcl::PointXYZRGBA> source_cloud_color_handler(source_point_cloud, 0, 255, 0);//柠檬绿
+  pcl::visualization::PointCloudColorHandlerCustom<pcl::PointXYZRGBA> target_cloud_color_handler(target_point_cloud, 0, 255, 0);//柠檬绿
   viewer1->createViewPort(0.0, 0.0, 0.5, 1.0, v1);//(Xmin,Ymin,Xmax,Ymax)设置不同视角窗口坐标
   viewer1->setBackgroundColor(255, 255, 255, v1);//设置背景色为白色
   viewer1->addText("source_point_cloud_image", 10, 10,1.0,0.0,0.0, "v1 text", v1);
-  viewer1->addPointCloud(source_point_cloud,"source_point_cloud",v1);
+  viewer1->addPointCloud(source_point_cloud, source_cloud_color_handler,"source_point_cloud",v1);
   //target点云视角
   viewer1->createViewPort(0.5, 0.0, 1.0, 1.0, v2);
   viewer1->setBackgroundColor(255, 255, 255, v2);//设置背景色为白色
   viewer1->addText("target_point_cloud_image", 10, 10, 1.0, 0.0, 0.0, "v2 text", v2);
-  viewer1->addPointCloud(target_point_cloud, "target_point_cloud",v2);
+  viewer1->addPointCloud(target_point_cloud, target_cloud_color_handler, "target_point_cloud",v2);
   //viewer2->addCoordinateSystem(1.0);
  
 //——————————————————————————————————————————————————————
   //点云分块后显示
   boost::shared_ptr<pcl::visualization::PCLVisualizer> viewer2(new pcl::visualization::PCLVisualizer("source点云分块视角"));
   boost::shared_ptr<pcl::visualization::PCLVisualizer> viewer3(new pcl::visualization::PCLVisualizer("target点云分块视角"));
-  viewer2->setBackgroundColor(0, 0, 0);//设置背景色为黑色
+  viewer2->setBackgroundColor(255, 255, 255);//设置背景色为白色
   viewer2->addText("seg_source_point_cloud_image,total "+ to_string(seg_nums)+"parts", 10, 10, 1.0, 0.0, 0.0);
-  viewer3->setBackgroundColor(0, 0, 0);//设置背景色为黑色
+  viewer3->setBackgroundColor(255, 255, 255);//设置背景色为白色
   viewer3->addText("seg_target_point_cloud_image,total " + to_string(seg_nums) + "parts", 10, 10, 1.0, 0.0, 0.0);
   // 先进行FPS采样，得到分割点云块的中心点
   vector<int> source_sampleIndex;
@@ -795,7 +798,7 @@ int
   vector<vector<int>> NewTargetCloudIndex(seg_nums);
   vector<vector<int>> PointRegionPair(seg_nums*seg_nums);
   int K = (int)(source_point_cloud->points.size() / seg_nums * K_factor); //每块含有的点云数量
-  cout << "每块包含点云的数量:"<<K << endl;
+  cout << "每块包含点云的数量:"<<K << endl; //这个数量其实是overlap区域点云数量
 
   //红,橙,黄,绿,青,蓝,紫,深红,深橙,金，橄榄绿
   string colorname[16] = { "red","orange","yellow","green","cyan","blue","purple","darkRed","darkOrange","gold","oliveDrab","DarkTurquoise","DarkSlateBlue","DarkViolet","Pink", "Brown4"};
@@ -813,13 +816,13 @@ int
 	  SegmentCloud(source_point_cloud, NewSourceCloud[i], NewSourceCloudIndex[i], source_sampleIndex[i], seg_nums, K);
 	  //——————————————————————————————————————————————————————
 	  //实验一图
-	  /*
+	/*   
 	  target_sampleIndex[i] = source_sampleIndex[i];
 	  NewTargetCloudIndex[i] = NewSourceCloudIndex[i];
 	  NewTargetCloud[i] = NewSourceCloud[i];
-	  */
+	*/
 	  //——————————————————————————————————————————————————————
-	 SegmentCloud(target_point_cloud, NewTargetCloud[i], NewTargetCloudIndex[i], target_sampleIndex[i], seg_nums, K);
+	 SegmentCloud(target_point_cloud, NewTargetCloud[i], NewTargetCloudIndex[i], target_sampleIndex[i], seg_nums, K); 
   }
   clock_t segment_end = clock();
   cout << "分割且结束,用时:" << (double)(segment_end - segment_start) / (double)CLOCKS_PER_SEC << " s" << endl;
@@ -860,7 +863,14 @@ int
   //——————————————————————————————————————————————————————
    clock_t ransac_start = clock();
   //点云分块后ransac配准
-
+	//——————————————————————————————————————————————————————
+   //实验一 柱状图
+   double similar_block = 0;
+   int similar_block_count = 0;
+   double similar_block_average = 0;
+   double unsimilar_block = 0;
+   int unsimilar_block_count = 0;
+   double unsimilar_block_average = 0;
 #pragma omp parallel for
 	   for (int i = 0; i < seg_nums; i++) {
 		   for (int j = 0; j < seg_nums; j++) {
@@ -869,10 +879,23 @@ int
 			   Ransac_registration(NewSourceCloud[i].makeShared(), NewTargetCloud[j].makeShared(), TR_vector[i*seg_nums + j], rms_vector[i*seg_nums + j]);
 			   PointRegionPair[i*seg_nums + j] = { i,j };
 			   cout << "已ransac source点云的" << i << "部分和target点云的" << j << "部分,rms值为"<<rms_vector[i*seg_nums + j]<<"。使用的线程为:"<< omp_get_thread_num() << endl;
+			   if (i == j) {
+				   similar_block = similar_block + rms_vector[i*seg_nums + j];
+				   similar_block_count++;
+			}
+			   else
+			   {
+				   unsimilar_block = unsimilar_block + rms_vector[i*seg_nums + j];
+				   unsimilar_block_count++;
+			   }
 		   }
 	   }
   clock_t ransac_end = clock();
   cout << "ransac结束,用时:" << (double)(ransac_end - ransac_start) / (double)CLOCKS_PER_SEC << " s" << endl;
+  similar_block_average = similar_block/ similar_block_count;
+  unsimilar_block_average = unsimilar_block / unsimilar_block_count;
+  cout << "similar_block_average:" << similar_block_average  << endl;
+  cout << "unsimilar_block_average:" << unsimilar_block_average << endl;
   //——————————————————————————————————————————————————————
 
   //显示最佳结果

@@ -195,8 +195,9 @@ main(int argc, char** argv)
 	//source点云视角
 	viewer1->createViewPort(0.0, 0.0, 0.5, 1.0, v1);//(Xmin,Ymin,Xmax,Ymax)设置不同视角窗口坐标
 	viewer1->setBackgroundColor(255, 255, 255, v1);//设置背景色为白色
+	pcl::visualization::PointCloudColorHandlerCustom<pcl::PointXYZRGBA> orign_point_cloud_color_handler(origin_point_cloud, 0, 0, 0);//黑色
 	viewer1->addText("orign_point_cloud", 10, 10, 1.0, 0.0, 0.0, "v1 text", v1);
-	viewer1->addPointCloud(origin_point_cloud, "origin_point_cloud", v1);
+	viewer1->addPointCloud(origin_point_cloud, orign_point_cloud_color_handler, "origin_point_cloud", v1);
 	//target点云视角
 	viewer1->createViewPort(0.5, 0.0, 1.0, 1.0, v2);
 	viewer1->setBackgroundColor(255, 255, 255, v2);//设置背景色为白色
@@ -230,11 +231,13 @@ main(int argc, char** argv)
 	string x_rotation(argv[4]);
 	string y_rotation(argv[5]);
 	string z_rotation(argv[6]);
-	string source_point_cloud_filepath= origin_point_cloud_name.substr(0,origin_point_cloud_name.size() - 4) +"_"+ source_point_cloud_rate+"_0"+ "_0"+ "_0"+".pcd";
-	string target_point_cloud_filepath = origin_point_cloud_name.substr(0,origin_point_cloud_name.size() - 4) + "_" + target_point_cloud_rate+ "_"+ x_rotation + "_" + y_rotation + "_" + z_rotation + ".pcd";
+	string source_point_cloud_filepath= origin_point_cloud_name.substr(0,origin_point_cloud_name.size() - 4) +"_"+ source_point_cloud_rate+"_0"+ "_0"+ "_0";
+	string target_point_cloud_filepath = origin_point_cloud_name.substr(0,origin_point_cloud_name.size() - 4) + "_" + target_point_cloud_rate+ "_"+ x_rotation + "_" + y_rotation + "_" + z_rotation ;
 	string transform_matrix_filepath = origin_point_cloud_name.substr(0, origin_point_cloud_name.size() - 4) + "_" + source_point_cloud_rate + "_" + target_point_cloud_rate + "_" + x_rotation + "_" + y_rotation + "_" + z_rotation + ".txt";
-	pcl::io::savePCDFileASCII(source_point_cloud_filepath, *source_point_cloud);
-	pcl::io::savePCDFileASCII(target_point_cloud_filepath, *target_point_cloud);
+	pcl::io::savePCDFileASCII(source_point_cloud_filepath+".pcd", *source_point_cloud);
+	pcl::io::savePCDFileASCII(target_point_cloud_filepath + ".pcd", *target_point_cloud);
+	pcl::io::savePLYFileASCII(source_point_cloud_filepath + ".ply", *source_point_cloud);
+	pcl::io::savePLYFileASCII(target_point_cloud_filepath + ".ply", *target_point_cloud);
 
 	std::ofstream fout;
 	fout.open(transform_matrix_filepath, std::ios::app);//在文件末尾追加写入
