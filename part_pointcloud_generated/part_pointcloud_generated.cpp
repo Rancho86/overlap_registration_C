@@ -234,8 +234,8 @@ main(int argc, char** argv)
 	string source_point_cloud_filepath= origin_point_cloud_name.substr(0,origin_point_cloud_name.size() - 4) +"_"+ source_point_cloud_rate+"_0"+ "_0"+ "_0";
 	string target_point_cloud_filepath = origin_point_cloud_name.substr(0,origin_point_cloud_name.size() - 4) + "_" + target_point_cloud_rate+ "_"+ x_rotation + "_" + y_rotation + "_" + z_rotation ;
 	string transform_matrix_filepath = origin_point_cloud_name.substr(0, origin_point_cloud_name.size() - 4) + "_" + source_point_cloud_rate + "_" + target_point_cloud_rate + "_" + x_rotation + "_" + y_rotation + "_" + z_rotation + ".txt";
-	pcl::io::savePCDFileASCII(source_point_cloud_filepath+".pcd", *source_point_cloud);
-	pcl::io::savePCDFileASCII(target_point_cloud_filepath + ".pcd", *target_point_cloud);
+	//pcl::io::savePCDFileASCII(source_point_cloud_filepath+".pcd", *source_point_cloud);
+	//pcl::io::savePCDFileASCII(target_point_cloud_filepath + ".pcd", *target_point_cloud);
 	pcl::io::savePLYFileASCII(source_point_cloud_filepath + ".ply", *source_point_cloud);
 	pcl::io::savePLYFileASCII(target_point_cloud_filepath + ".ply", *target_point_cloud);
 

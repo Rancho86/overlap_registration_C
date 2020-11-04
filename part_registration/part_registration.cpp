@@ -1001,7 +1001,11 @@ int
   viewer->addPointCloud(pc2PairRegion, best_targetPairRegion_cloud_color_handler, "targetPairRegion_cloud");
   //——————————————————————————————————————————————————————
   //保存旋转矩阵
-  string origin_transform_matrix_filepath = pc1name.substr(0, pc1name.size() - 4) + "_part" + to_string(pc1) + "_" + pc2name.substr(0, pc2name.size() - 4) + "_part" + to_string(pc2) + ".txt";
+  cout << pc1name << endl;
+  int begin = pc2name.find_last_of('\\');
+  string origin_transform_matrix_filepath = pc1name.substr(0, pc1name.size() - 4) + "_part" + to_string(pc1) + "_" + pc2name.substr(begin+1, pc2name.size() - 4) + "_part" + to_string(pc2) + ".txt";
+ // string origin_transform_matrix_filepath = pc1name.substr(0, pc1name.size() - 4) + "_part" + to_string(pc1) + "_" + pc2name.substr(0, pc2name.size() - 4) + "_part" + to_string(pc2) + ".txt";
+  cout << origin_transform_matrix_filepath << endl;
   std::ofstream  origin;
   origin.open(origin_transform_matrix_filepath, std::ios::app);//在文件末尾追加写入
   origin << finaltransformation << std::endl;//每次写完一个矩阵以后换行
@@ -1123,7 +1127,7 @@ int
  
 	  //——————————————————————————————————————————————————————
 	  //保存旋转矩阵
-	  string transform_matrix_filepath = pc1name.substr(0,pc1name.size()-4)+"_part"+ sourcepart+"_"+ pc2name.substr(0, pc2name.size() - 4) + "_part" + targetpart+ ".txt";
+	  string transform_matrix_filepath = pc1name.substr(0,pc1name.size()-4)+"_part"+ sourcepart+"_"+ pc2name.substr(begin + 1, pc2name.size() - 4) + "_part" + targetpart+ ".txt";
 	  std::ofstream fout;
 	  fout.open(transform_matrix_filepath, std::ios::app);//在文件末尾追加写入
 	  fout << manual_finaltransformation << std::endl;//每次写完一个矩阵以后换行
