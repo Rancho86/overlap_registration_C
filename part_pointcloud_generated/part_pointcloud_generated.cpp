@@ -82,10 +82,32 @@ Eigen::Matrix3f revertmatrix(double x, double y, double z) {
 }
 
 
+bool cmp (vector<double>& a, vector<double>&b)
+	{
+		return a[2] < b[2];//±íÊ¾°´µÚ3ÁÐ´ÓÐ¡µ½´ó½øÐÐÅÅÐò
+	}
 
 void generate_part_pointcloud(const pcl::PointCloud<pcl::PointXYZRGBA>::Ptr origin_point_cloud, pcl::PointCloud<pcl::PointXYZRGBA>::Ptr source_cloud, pcl::PointCloud<pcl::PointXYZRGBA>::Ptr target_cloud, pcl::PointCloud<pcl::PointXYZRGBA>::Ptr source_point_cloud_overlap, pcl::PointCloud<pcl::PointXYZRGBA>::Ptr target_point_cloud_overlap, Eigen::Matrix4f &R_4,int argc, char **argv)
 {
 	int origin_point_cloud_count = origin_point_cloud->points.size();
+	//¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª
+	//°ÑµãÔÆ°´ÕÕÒ»¸öÉ¨Ãè·½Ïò£¨yÖá£©ÅÅÐò
+	vector<vector<double>> originalpoints;
+	for (int i = 0; i < origin_point_cloud_count; i++) {
+		vector<double> points;
+		points.push_back(origin_point_cloud->points[i].x);
+		points.push_back(origin_point_cloud->points[i].y);
+		points.push_back(origin_point_cloud->points[i].z);
+		originalpoints.push_back(points);
+	}
+	sort(originalpoints.begin(), originalpoints.end(), cmp);
+	for (int i = 0; i < origin_point_cloud_count; i++) {
+		origin_point_cloud->points[i].x = originalpoints[i][0];
+		origin_point_cloud->points[i].y = originalpoints[i][1];
+		origin_point_cloud->points[i].z = originalpoints[i][2];
+	}
+
+	//¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª
 	std::vector<int> source_indices;
 	std::vector<int> target_indices;
 	std::vector<int> overlap_indices;
@@ -95,7 +117,7 @@ void generate_part_pointcloud(const pcl::PointCloud<pcl::PointXYZRGBA>::Ptr orig
 	int target_count = floor(origin_point_cloud_count*target_percent);
 	for (int i = 0; i < source_count; i++)
 		source_indices.push_back(i);
-	for (int j = origin_point_cloud_count-1-target_count; j < origin_point_cloud_count; j++)
+	for (int j = origin_point_cloud_count-target_count; j < origin_point_cloud_count; j++)
 		target_indices.push_back(j);
 	for (int i = origin_point_cloud_count-target_count;i< source_count;i++)
 		overlap_indices.push_back(i);
