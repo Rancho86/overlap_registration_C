@@ -5,50 +5,47 @@
 #include<ctime>
 #include<algorithm>
 #include<math.h>
-#include<omp.h> //并行计算
-// io读取的头文件
+#include<omp.h> 
+//pointcloud_read
 #include <pcl/PolygonMesh.h>
 #include <pcl/io/io.h>
 #include<pcl/io/obj_io.h>
 #include<pcl/io/ply_io.h>
 #include<pcl/io/pcd_io.h>
-#include <pcl/io/vtk_lib_io.h>//loadPolygonFile所属头文件；
+#include <pcl/io/vtk_lib_io.h>
 #include<pcl/console/parse.h>
-
-//
 #include <pcl/point_cloud.h>
 #include <pcl/point_types.h>
 #include <pcl/visualization/pcl_visualizer.h>
 #include <pcl/registration/icp.h>	
-//降采样用到的头文件
+//Downsample
 #include <pcl/filters/random_sample.h> 
 #include<pcl/filters/extract_indices.h>
 #include<pcl/filters/voxel_grid.h>
 #include<pcl/kdtree/kdtree_flann.h>
 #include <pcl/keypoints/uniform_sampling.h>
-// ransac配准需要的头文件
+//Ransac
 #include<pcl/sample_consensus/sac_model_registration.h>
 #include <pcl/registration/icp.h>
 #include <pcl/registration/ia_ransac.h>
-//特征部分头文件
+//Feature
 #include <pcl/features/normal_3d.h>
-//#include <pcl/features/fpfh.h>
 #include <pcl/features/fpfh_omp.h>
 using namespace std;
 
 
 void printUsage(const char* progName)
 {
-	cout << "先输入两个点云名字，再加一个整数代表分块数量，再加需要设置的选项" << endl;
-	cout << "-r 加配准类型，0为完整配完整，1为部分配完整，2为部分配部分，3为未知" << endl;
-	cout << "-o 加重叠率" << endl;
-	cout << "-s 加强制降采样数量" << endl;
-	cout << "-p 加分块数量" << endl;
-	cout << "例子："<<progName<<" source_point_cloud.pcd/obj/ply target_point_cloud.pcd/obj/ply -r 1 -o 0.6" << endl;
-	cout << "测试版本" << endl;
+	cout << "First enter the two point cloud names, and then add the options that need to be set" << endl;
+	cout << "-r Add registration type, 0 means ‘whole to whole’, 1 means ‘part to whole’, 2 means ‘part to part’, 3 means ’unknown‘" << endl;
+	cout << "-o Add overlap rate,the default is 0.3" << endl;
+	cout << "-f Add downsample factor,the default is 0.2" << endl;
+	cout << "-p Add the number of blocks,the default is calculated by overlap rate" << endl;
+	cout << "For example："<<progName<<" source_point_cloud.pcd/obj/ply target_point_cloud.pcd/obj/ply -r 1 -o 0.6 -f 1 -p 10" << endl;
+	cout << "Designed by SIA.Rancho" << endl;
 }
 
-//读取点云文件//
+//Read point cloud file//
 void read_pointcloud(const pcl::PointCloud<pcl::PointXYZRGBA>::Ptr source_point_cloud, const pcl::PointCloud<pcl::PointXYZRGBA>::Ptr target_point_cloud, int argc, char **argv)
 {
 	clock_t read_pc_start = clock();
@@ -62,30 +59,27 @@ void read_pointcloud(const pcl::PointCloud<pcl::PointXYZRGBA>::Ptr source_point_
 		pcl::io::loadPLYFile(argv[1], *source_point_cloud);
 	if (pc1ext.compare("obj") == 0)
 	{
-		cout << "开始读source_point_cloud" <<  endl;
+		//cout << "start reading source_point_cloud" <<  endl;
 		pcl::io::loadPolygonFile(argv[1], mesh1);
-		cout << "读完source_point_cloud，转pcl" << endl;
 		pcl::fromPCLPointCloud2(mesh1.cloud, *source_point_cloud);
-		cout << "处理完source_point_cloud" << endl;
+
 	}
-		//pcl::io::loadOBJFile(argv[1], *source_point_cloud); //这种读入的方式特别慢
+		//pcl::io::loadOBJFile(argv[1], *source_point_cloud); //This method of reading is extremely slow
 	if (pc1ext.compare("pcd") == 0)
 		pcl::io::loadPCDFile(argv[1], *source_point_cloud);
 	if (pc2ext.compare("ply") == 0)
 		pcl::io::loadPLYFile(argv[2], *target_point_cloud);
 	if (pc2ext.compare("obj") == 0)		
 	{
-		cout << "开始读target_point_cloud" << endl;
+		//cout << "start reading target_point_cloud" << endl;
 		pcl::io::loadPolygonFile(argv[2], mesh2);
-		cout << "读完target_point_cloud，转pcl" << endl;
 		pcl::fromPCLPointCloud2(mesh2.cloud, *target_point_cloud);
-		cout << "处理完target_point_cloud" << endl;
 	}
-		//pcl::io::loadOBJFile(argv[2], *target_point_cloud); //这种读入的方式特别慢
+		//pcl::io::loadOBJFile(argv[2], *target_point_cloud); //This method of reading is extremely slow
 	if (pc2ext.compare("pcd") == 0)
 		pcl::io::loadPCDFile(argv[2], *target_point_cloud);
 	
-	//去除nan点
+	//Remove nan points
 	std::vector<int> indices_source_nan_indice;
 	std::vector<int> indices_target_nan_indice;
 	pcl::removeNaNFromPointCloud(*source_point_cloud, *source_point_cloud, indices_source_nan_indice);
@@ -97,32 +91,51 @@ void read_pointcloud(const pcl::PointCloud<pcl::PointXYZRGBA>::Ptr source_point_
 	cout << "target_point_cloud size : " << target_point_cloud->points.size() << endl;
 }
 
-void compute_pointcloud_density(const pcl::PointCloud<pcl::PointXYZRGBA>::Ptr point_cloud,double &delta) {
-	int aa = point_cloud->points.size();
-	double qxmax = point_cloud->points[0].x;
-	double qxmin = point_cloud->points[0].x;
-	double qymax = point_cloud->points[0].y;
-	double qymin = point_cloud->points[0].y;
-	double qzmax = point_cloud->points[0].z;
-	double qzmin = point_cloud->points[0].z;
-	for (int i = 0; i < aa - 1; i++)
-	{
-		double qx = point_cloud->points[i].x;
-		qxmax = max(qx, qxmax);
-		qxmin = min(qx, qxmin);
-		double qy = point_cloud->points[i].y;
-		qymax = max(qy, qymax);
-		qymin = min(qy, qymin);
-		double qz = point_cloud->points[i].z;
-		qzmax = max(qz, qzmax);
-		qzmin = min(qz, qzmin);
+//Calculate point cloud resolution
+double
+computeCloudResolution(const pcl::PointCloud<pcl::PointXYZRGBA>::Ptr cloud)
+{
+	double res = 0.0;
+	int n_points = 0;
+	int nres;
+	std::vector<int> indices(2);
+	std::vector<float> sqr_distances(2);
+	pcl::search::KdTree<pcl::PointXYZRGBA> tree;
+	tree.setInputCloud(cloud);
 
+	for (std::size_t i = 0; i < cloud->size(); ++i)
+	{
+		if (!std::isfinite((*cloud)[i].x))
+		{
+			continue;
+		}
+		//Considering the second neighbor since the first is the point itself.
+		nres = tree.nearestKSearch(i, 2, indices, sqr_distances);
+		if (nres == 2)
+		{
+			res += sqrt(sqr_distances[1]);
+			++n_points;
+		}
 	}
-	double pointnumber = pow(aa, 1.0 / 3);
-	delta = max(max((qxmax - qxmin) / pointnumber, (qymax - qymin) / pointnumber), (qzmax - qzmin) / pointnumber);
+	if (n_points != 0)
+	{
+		res /= n_points;
+	}
+	return res;
 }
 
-//降采样
+void compute_error(const Eigen::Matrix4f TR_registration, const Eigen::Matrix4f TR_true, double &Rerror, double &Terror) {
+	Eigen::Matrix4f TR_error;
+	TR_error = TR_registration * TR_true.inverse();
+	cout << TR_error << endl;
+	Eigen::Matrix3f TR_Diff_R;
+	TR_Diff_R = TR_error.block<3, 3>(0, 0);
+	cout << TR_Diff_R << endl;
+	Rerror = fabs(acos((TR_Diff_R.trace() - 1) / 2)) * 180 / 3.14;
+	Terror = (fabs(TR_error(0, 3)) + fabs(TR_error(1, 3)) + fabs(TR_error(2, 3))) / 3;
+}
+
+//Random Downsample
 void DownSample(pcl::PointCloud<pcl::PointXYZRGBA>::Ptr cloud,int count)
 {
 	pcl::RandomSample<pcl::PointXYZRGBA> sor;
@@ -135,126 +148,100 @@ void DownSample(pcl::PointCloud<pcl::PointXYZRGBA>::Ptr cloud,int count)
 //FPS
 void ComputeFPS(const pcl::PointCloud<pcl::PointXYZRGBA>::Ptr cloud, const int nums, vector<int> &SampleIndex)
 {
-	// 采样数量由用户定义
 	int sample_nums = nums;
-	// 记录待分割点云中的数量
 	int cloud_points_size = cloud->points.size();
-	// 记录剩余点云的索引
 	vector<int> rest_cloud_pointsIndex;
-	// 记录待分割点云中每个点到分割点云集合的距离
 	vector<double> rest2sample_dist(cloud_points_size);
-	// 初始化
 	for (int i = 0; i < cloud_points_size; i++)
 		rest_cloud_pointsIndex.push_back(i);
-	// 测试
-	//cout << "rest_source_pointsIndex的容量：" << rest_cloud_pointsIndex.size() << endl;
 
-	double max_dist = -999.0;         // 记录最大距离，选取第二个点时使用
-	double max_dist_;                 // 记录最大距离，选取第二个之后的点时使用
-	int farthest_point = -1;          // 记录最远点
-	double length_dist=DBL_MAX;               // 点与点之间的距离 
-	int sample_inteIndex = -1;           // 采样点云中相对分段位置
-	int sample_inteIndex_value = -1;     // 采样点云中相对位置对应真实点云的索引
-	int inteIndex_value = -1;         // 剩余点云索引对应真实点云的索引
-	srand(time(NULL));                // 用系统时间初始化随机种子
+	double max_dist = DBL_MIN;         // Record the maximum distance, use when picking the second point
+	double max_dist_;                 // Record the maximum distance, use when picking the second and subsequent points
+	int farthest_point = -1;          // Record farthest point
+	double length_dist=DBL_MAX;               // The distance between points 
+	int sample_inteIndex = -1;           // Relative segment position in sample point cloud
+	int sample_inteIndex_value = -1;     // The relative position in the sampled point cloud corresponds to the index of the real point cloud
+	int inteIndex_value = -1;         // The remaining point cloud index corresponds to the index of the real point cloud
+	srand(time(NULL));                // Initialize random seed with system time
 
-	// Step1: 随机选择一个点
 	clock_t  sample_start, sample_stop;
 	sample_start = clock();
-	// 首先随机选择待分割点云的一点(随机生成其索引)
 	int first_select = rand() % (rest_cloud_pointsIndex.size() + 1);
 	int first_select_value = rest_cloud_pointsIndex[first_select];
-	// 将第一个点的索引放入分割块中
 	SampleIndex.push_back(rest_cloud_pointsIndex[first_select]);
-	// 测试
-	//cout << SampleIndex.size() << endl;
-	// 待分割点云中删除该点
 	vector<int>::iterator iter = rest_cloud_pointsIndex.begin() + first_select;
 	rest_cloud_pointsIndex.erase(iter);
-	// 测试
-	//cout << rest_cloud_pointsIndex.size() << endl;
-
-	// Step2: 选择第二个点
-	// 计算剩余点与第一个点的距离
-	for (size_t j = 0; j < rest_cloud_pointsIndex.size(); j++)
-	{
-		inteIndex_value = rest_cloud_pointsIndex[j];
-		// 计算距离
-		length_dist = pow(abs(cloud->points[inteIndex_value].x - cloud->points[first_select_value].x), 2) +
-			pow(abs(cloud->points[inteIndex_value].y - cloud->points[first_select_value].y), 2) +
-			pow(abs(cloud->points[inteIndex_value].z - cloud->points[first_select_value].z), 2);
-
-		rest2sample_dist[j] = length_dist;              // 将待采样点云中每个点到采样点云的最小距离保存
-		if (length_dist > max_dist)
-		{
-			max_dist = length_dist;
-			farthest_point = j;
-		}
-	}
-	// 将第二个最远点的索引保存至分割块中
-	SampleIndex.push_back(rest_cloud_pointsIndex[farthest_point]);
-	// 将该点从剩余点云中删除
-	iter = rest_cloud_pointsIndex.begin() + farthest_point;
-	rest_cloud_pointsIndex.erase(iter);
-
-	// 测试
-	//cout << "选取第二个点成功" << endl;
-	//cout << SampleIndex.size() << endl;
-	//cout << rest_cloud_pointsIndex.size() << endl;
-
-	// Step3: 选择其他的点，     先“min”,后“max”
-	while (SampleIndex.size() < sample_nums)
-	{
-		max_dist_ = -99999.0;                // 每选一个点，将其赋值极小，以便后续使用
-
-		// 遍历剩余点云 
+	if (nums > 1) {
 		for (int j = 0; j < rest_cloud_pointsIndex.size(); j++)
 		{
-			length_dist = DBL_MAX;
 			inteIndex_value = rest_cloud_pointsIndex[j];
-			// 计算剩余点云与新选取点之间的距离，并与之前选取的点之间距离比较取最小值，更新距离矩阵
-			// 计算距离
+			// Calculate distance
+			length_dist = pow(abs(cloud->points[inteIndex_value].x - cloud->points[first_select_value].x), 2) +
+				pow(abs(cloud->points[inteIndex_value].y - cloud->points[first_select_value].y), 2) +
+				pow(abs(cloud->points[inteIndex_value].z - cloud->points[first_select_value].z), 2);
 
-			for (int i = 0; i < SampleIndex.size(); i++) {
-				sample_inteIndex_value = SampleIndex[i];
-				double length_dist_a = pow(abs(cloud->points[inteIndex_value].x - cloud->points[sample_inteIndex_value].x), 2) +
-					pow(abs(cloud->points[inteIndex_value].y - cloud->points[sample_inteIndex_value].y), 2) +
-					pow(abs(cloud->points[inteIndex_value].z - cloud->points[sample_inteIndex_value].z), 2);
-				length_dist = min(length_dist, length_dist_a);
+			rest2sample_dist[j] = length_dist;              // Save the minimum distance from each point in the point cloud to be sampled to the sample point cloud
+			if (length_dist > max_dist)
+			{
+				max_dist = length_dist;
+				farthest_point = j;
 			}
-
-			// 比较距离并更新矩阵
-				rest2sample_dist[j] = length_dist;
-
-
-			// 再取“最大”
-				if (rest2sample_dist[j] > max_dist_)
-				{
-					farthest_point = j;
-					max_dist_ = rest2sample_dist[j];
-				}
 		}
-		// 将选取的最远点保存至分割点云中
+		// Save the index of the second furthest point in the partition
 		SampleIndex.push_back(rest_cloud_pointsIndex[farthest_point]);
-		// 将该点从剩余点云中删除
+		// Delete the point from the remaining point cloud
 		iter = rest_cloud_pointsIndex.begin() + farthest_point;
 		rest_cloud_pointsIndex.erase(iter);
 
-		// 测试
-		//cout << "                 选取一个最远点成功！" << endl;
+		if (nums > 2) {
+			while (SampleIndex.size() < sample_nums)
+			{
+				max_dist_ = DBL_MIN;                
+
+				// Traverse the remaining point cloud
+
+				for (int j = 0; j < rest_cloud_pointsIndex.size(); j++)
+				{
+					length_dist = DBL_MAX;
+					inteIndex_value = rest_cloud_pointsIndex[j];
+					// Calculate the distance between the remaining point cloud and the newly selected point, and compare the distance with the previously selected point to take the minimum value, and update the distance matrix
+					// Calculate distance
+					for (int i = 0; i < SampleIndex.size(); i++) {
+						sample_inteIndex_value = SampleIndex[i];
+						double length_dist_a = pow(abs(cloud->points[inteIndex_value].x - cloud->points[sample_inteIndex_value].x), 2) +
+							pow(abs(cloud->points[inteIndex_value].y - cloud->points[sample_inteIndex_value].y), 2) +
+							pow(abs(cloud->points[inteIndex_value].z - cloud->points[sample_inteIndex_value].z), 2);
+						length_dist = min(length_dist, length_dist_a);
+					}
+
+					// Compare distance and update matrix
+					rest2sample_dist[j] = length_dist;
+
+					if (rest2sample_dist[j] > max_dist_)
+					{
+						farthest_point = j;
+						max_dist_ = rest2sample_dist[j];
+					}
+				}
+				// Save the selected farthest point to the split point cloud
+				SampleIndex.push_back(rest_cloud_pointsIndex[farthest_point]);
+				// Delete the point from the remaining point cloud
+				iter = rest_cloud_pointsIndex.begin() + farthest_point;
+				rest_cloud_pointsIndex.erase(iter);
+
+			}
+		}
 	}
 	sample_stop = clock();
 
-	// 测试
-	cout << "采样完毕！" << endl;
-	cout << "采样数量：" << SampleIndex.size() << endl;
-	cout << "最远点采样(FPS)用时：" << (double)(sample_stop - sample_start) / (double)CLOCKS_PER_SEC << "秒" << endl;
+	cout << "FPS sampling completed！" << endl;
+	cout << "Number of seed points：" << SampleIndex.size() << endl;
+	cout << "FPS Time：" << (double)(sample_stop - sample_start) / (double)CLOCKS_PER_SEC << "s" << endl;
 }
 
 // ---------------------------------------------------------------------------
-// -----------------------------分割点云程序 ---------------------------------
-// ---------使用FPS采样的点为中心点，利用KD树进行切割点云 --------------------
-// -------------每次分割一个点云 --------------------------------------------
+// -----------------------------Point cloud block program ---------------------------------
+// ---------Use the point sampled by FPS as the center point, and use the KD tree to obtain the point cloud block --------------------
 // ---------------------------------------------------------------------------
 void SegmentCloud(const pcl::PointCloud<pcl::PointXYZRGBA>::Ptr cloud, pcl::PointCloud<pcl::PointXYZRGBA> &newcloud, vector<int> &pointIdxNKNSearch, const int index, const int seg_nums, const int K,const int sample_num)
 {
@@ -264,12 +251,6 @@ void SegmentCloud(const pcl::PointCloud<pcl::PointXYZRGBA>::Ptr cloud, pcl::Poin
 	kdtree.setInputCloud(cloud);
 	pcl::PointXYZRGBA searchPoint = cloud->points[index];
 
-	//int K = (int)((int)(cloud->points.size()*0.4) / seg_nums);
-
-	//int K = 2000;  //这个K应该根据点云密度决定，让这两个点云相同就行
-
-	// 这里使用K值查询近邻点，更合理
-	//vector<int> pointIdxNKNSearch(K);
 	vector<float> pointNKNSquaredDistance(K);
 
 	pcl::PointCloud<pcl::PointXYZRGBA>::Ptr cloud_ptr(new pcl::PointCloud < pcl::PointXYZRGBA>);
@@ -278,30 +259,26 @@ void SegmentCloud(const pcl::PointCloud<pcl::PointXYZRGBA>::Ptr cloud, pcl::Poin
 	if (kdtree.nearestKSearch(searchPoint, K, pointIdxNKNSearch, pointNKNSquaredDistance) > 0)
 	{
 		boost::shared_ptr<vector<int>> pointIdxRadiusSearch_ptr = boost::make_shared<vector<int>>(pointIdxNKNSearch);
-		// 根据索引提取点云
+		// Extract point cloud based on index
 		extract.setInputCloud(cloud);
 		extract.setIndices(pointIdxRadiusSearch_ptr);
-		extract.setNegative(false);                    //如果设为true, 可以提取指定index之外的点云
+		extract.setNegative(false);                    //If set to true, point clouds outside the specified index can be extracted
 		extract.filter(*cloud_ptr);
 		//newcloud = *cloud_ptr;
 	}
-	//强制降采样
-	//cout <<"newcloud.points.size()降采样前："<< cloud_ptr->points.size() << endl;
+
 	pcl::PointCloud<pcl::PointXYZRGBA>::Ptr newcloud_s(new pcl::PointCloud < pcl::PointXYZRGBA>);
 	newcloud_s = newcloud.makeShared();
 	if (cloud_ptr->points.size()> sample_num)
 		DownSample(cloud_ptr, sample_num);
 	newcloud = *cloud_ptr;
-	//cout << "newcloud.points.size()降采样后：" << newcloud.points.size() << endl;
 	seg_stop = clock();
-	//cout << " 分割点云块中点的数量：" << pointIdxNKNSearch.size() << endl;
-	//cout << "切割一片点云用时：" << seg_stop - seg_start << "秒" << endl;
+	//cout << "Time to obtain the point cloud：" << seg_stop - seg_start << "s" << endl;
 }
 
 // ---------------------------------------------------------------------------------------
-// ------------------------------- ransac配准 --------------------------------------------
-// 输入：两片待配准点云
-// 输出：变换矩阵
+// ------------------------------- Use sac-ia to calculate similarity and transformation matrix --------------------------------------------
+// ---------------------------------------------------------------------------------------
 void Ransac_registration(const pcl::PointCloud<pcl::PointXYZRGBA>::Ptr source_point_cloud, const pcl::PointCloud<pcl::PointXYZRGBA>::Ptr target_point_cloud,
 	Eigen::Matrix4f &transformation, double &score)
 {	
@@ -312,18 +289,15 @@ void Ransac_registration(const pcl::PointCloud<pcl::PointXYZRGBA>::Ptr source_po
 	clock_t  fpfh_start, fpfh_end;
 	clock_t  sac_start, sac_end;
 
+	//Calculate point cloud resolution	
 	ransac_start = clock();
-	//计算密度
 	density_start = clock();
 	double sourcepoint_leafsize;
-	compute_pointcloud_density(source_point_cloud, sourcepoint_leafsize);
+	sourcepoint_leafsize = computeCloudResolution(source_point_cloud)*5;
 	double targetpoint_leafsize;
-	compute_pointcloud_density(target_point_cloud, targetpoint_leafsize);
-	//cout << "sourcepoint_leafsize:" << sourcepoint_leafsize << endl;
-	//cout << "targetpoint_leafsize:" << targetpoint_leafsize << endl;
+	targetpoint_leafsize = computeCloudResolution(target_point_cloud)*5;
 	density_end = clock();
-	//cout << "density用时:" << (double)(density_end - density_start) / (double)CLOCKS_PER_SEC << " s" << endl;
-	//降采样		
+	//Downsample	
 	downsample_start = clock();
 	pcl::VoxelGrid<pcl::PointXYZRGBA> voxel_grid;
 	voxel_grid.setLeafSize(sourcepoint_leafsize * 2, sourcepoint_leafsize * 2, sourcepoint_leafsize * 2);
@@ -339,9 +313,9 @@ void Ransac_registration(const pcl::PointCloud<pcl::PointXYZRGBA>::Ptr source_po
 	pcl::PointCloud<pcl::PointXYZRGBA>::Ptr TargetCloud(new pcl::PointCloud<pcl::PointXYZRGBA>);
 	voxel_grid_2.filter(*TargetCloud);
 	downsample_end = clock();
-	//cout << "降采样用时:" << (double)(downsample_end - downsample_start) / (double)CLOCKS_PER_SEC << " s" << endl;
-	
-	//计算表面法线
+	//cout << "Downsample time:" << (double)(downsample_end - downsample_start) / (double)CLOCKS_PER_SEC << " s" << endl;
+
+	//Calculate surface normal
 	normal_start = clock();
 	pcl::NormalEstimation<pcl::PointXYZRGBA, pcl::Normal> ne_src;
 	ne_src.setInputCloud(SourceCloud);
@@ -362,9 +336,9 @@ void Ransac_registration(const pcl::PointCloud<pcl::PointXYZRGBA>::Ptr source_po
 	//ne_tgt.setRadiusSearch(0.03);
 	ne_tgt.compute(*TargetCloud_normals);
 	normal_end = clock();
-	//cout << "normal用时:" << (double)(normal_end - normal_start) / (double)CLOCKS_PER_SEC << " s" << endl;
+	//cout << "Calculate surface normal time:" << (double)(normal_end - normal_start) / (double)CLOCKS_PER_SEC << " s" << endl;
 	
-	//计算FPFH
+	//calculate FPFH
 	fpfh_start = clock();
 	pcl::FPFHEstimationOMP<pcl::PointXYZRGBA, pcl::Normal, pcl::FPFHSignature33> fpfh_src;
 	fpfh_src.setInputCloud(SourceCloud);
@@ -388,72 +362,46 @@ void Ransac_registration(const pcl::PointCloud<pcl::PointXYZRGBA>::Ptr source_po
 	fpfh_tgt.compute(*fpfhs_tgt);
 	//std:://cout << "compute *TargetCloud fpfh" << endl;
 	fpfh_end = clock();
-	//cout << "fpfh用时:" << (double)(fpfh_end - fpfh_start) / (double)CLOCKS_PER_SEC << " s" << endl;
+	//cout << "fpfh time:" << (double)(fpfh_end - fpfh_start) / (double)CLOCKS_PER_SEC << " s" << endl;
 	
-	//SAC配准
+	//sac registration
 	sac_start = clock();
 	pcl::SampleConsensusInitialAlignment<pcl::PointXYZRGBA, pcl::PointXYZRGBA, pcl::FPFHSignature33> scia;
 	scia.setInputSource(SourceCloud);
 	scia.setInputTarget(TargetCloud);
 	scia.setSourceFeatures(fpfhs_src);
 	scia.setTargetFeatures(fpfhs_tgt);
-	//scia.setNumberOfSamples(20);
-	//scia.setRANSACIterations(30);
-	//scia.setRANSACOutlierRejectionThreshold(targetpoint_leafsize * 10);
-	//scia.setCorrespondenceRandomness(20);
-	//scia.setMinSampleDistance(1);
-	//scia.setNumberOfSamples(2);
-	//scia.setCorrespondenceRandomness(20);
-	//PointCloud::Ptr sac_result(new PointCloud);
+	scia.setMaxCorrespondenceDistance(sourcepoint_leafsize * 2 * sourcepoint_leafsize * 2);
 	pcl::PointCloud<pcl::PointXYZRGBA>::Ptr sac_result(new pcl::PointCloud<pcl::PointXYZRGBA>);
 	scia.align(*sac_result);
-	//std:://cout << "sac has converged:" << scia.hasConverged() << "  score: " << scia.getFitnessScore() << endl;
+	//cout << "sac has converged:" << scia.hasConverged() << "  score: " << scia.getFitnessScore() << endl;
 	transformation = scia.getFinalTransformation();
-	//std:://cout << transformation << endl;
+    //cout << transformation << endl;
 	sac_end = clock();
-	//cout << "sac用时:" << (double)(sac_end - sac_start) / (double)CLOCKS_PER_SEC << " s" << endl;
+	//cout << "sac time:" << (double)(sac_end - sac_start) / (double)CLOCKS_PER_SEC << " s" << endl;
 	ransac_end = clock();
-	//cout << "ransac用时:" << (double)(ransac_end - ransac_start) / (double)CLOCKS_PER_SEC << " s" << endl;
-	////cout << "使用ransac算法配准用时：" << (ransac_stop - ransac_start) << "秒" << endl;
+	//cout << "ransac time:" << (double)(ransac_end - ransac_start) / (double)CLOCKS_PER_SEC << " s" << endl;
 	if (scia.hasConverged())
 		score = scia.getFitnessScore();
-
-}
-void method_icp(const pcl::PointCloud<pcl::PointXYZRGBA>::Ptr source_point_cloud, const pcl::PointCloud<pcl::PointXYZRGBA>::Ptr target_point_cloud, const pcl::PointCloud<pcl::PointXYZRGBA>::Ptr OutCloud, Eigen::Matrix4f &registration_matrix)
-{
-	if (source_point_cloud->points.size() > 100000)
-		DownSample(source_point_cloud,100000);
-	if (target_point_cloud->points.size() > 100000)
-		DownSample(target_point_cloud, 100000);
-	pcl::IterativeClosestPoint<pcl::PointXYZRGBA, pcl::PointXYZRGBA> icp;
-	icp.setInputSource(source_point_cloud);
-	icp.setInputTarget(target_point_cloud);
-	pcl::PointCloud<pcl::PointXYZRGBA> Final;
-	icp.align(Final);
-	cout << "has converged:" << icp.hasConverged() << " score: " <<
-		icp.getFitnessScore() << endl;
-	//cout << icp.getFinalTransformation() << endl;
-	pcl::transformPointCloud(*source_point_cloud, *OutCloud, icp.getFinalTransformation());
-	registration_matrix = icp.getFinalTransformation();
 }
 
 void method_sac_icp(const pcl::PointCloud<pcl::PointXYZRGBA>::Ptr source_point_cloud, const pcl::PointCloud<pcl::PointXYZRGBA>::Ptr target_point_cloud,  Eigen::Matrix4f &registration_matrix)
 {
 	double sourcepoint_leafsize;
-	compute_pointcloud_density(source_point_cloud, sourcepoint_leafsize);
+	sourcepoint_leafsize = computeCloudResolution(source_point_cloud)*5;
 	double targetpoint_leafsize;
-	compute_pointcloud_density(target_point_cloud, targetpoint_leafsize);
-	vector<int> indices_src; //保存去除的点的索引
+	targetpoint_leafsize = computeCloudResolution(target_point_cloud)*5;
+	vector<int> indices_src; //Save the index of the removed point
 	pcl::removeNaNFromPointCloud(*source_point_cloud, *source_point_cloud, indices_src);
 	//cout << "remove *source_point_cloud nan" << endl;
-	//下采样滤波
+	//Downsample
 	pcl::VoxelGrid<pcl::PointXYZRGBA> voxel_grid;
 	voxel_grid.setLeafSize(sourcepoint_leafsize*2, sourcepoint_leafsize * 2, sourcepoint_leafsize * 2);
 	voxel_grid.setInputCloud(source_point_cloud);
 	pcl::PointCloud<pcl::PointXYZRGBA>::Ptr cloud_src(new pcl::PointCloud<pcl::PointXYZRGBA>);
 	voxel_grid.filter(*cloud_src);
 	//cout << "down size *source_point_cloud from " << source_point_cloud->size() << "to" << cloud_src->size() << endl;
-	//计算表面法线
+	//Calculate surface normal
 	pcl::NormalEstimation<pcl::PointXYZRGBA, pcl::Normal> ne_src;
 	ne_src.setInputCloud(cloud_src);
 	pcl::search::KdTree< pcl::PointXYZRGBA>::Ptr tree_src(new pcl::search::KdTree< pcl::PointXYZRGBA>());
@@ -483,7 +431,7 @@ void method_sac_icp(const pcl::PointCloud<pcl::PointXYZRGBA>::Ptr source_point_c
 	ne_tgt.setRadiusSearch(targetpoint_leafsize * 6);
 	ne_tgt.compute(*cloud_tgt_normals);
 
-	//计算FPFH
+	//calculate FPFH
 	pcl::FPFHEstimationOMP<pcl::PointXYZRGBA, pcl::Normal, pcl::FPFHSignature33> fpfh_src;
 	fpfh_src.setInputCloud(cloud_src);
 	fpfh_src.setInputNormals(cloud_src_normals);
@@ -504,17 +452,13 @@ void method_sac_icp(const pcl::PointCloud<pcl::PointXYZRGBA>::Ptr source_point_c
 	fpfh_tgt.compute(*fpfhs_tgt);
 	//cout << "compute *cloud_tgt fpfh" << endl;
 
-	//SAC配准
+	//SAC registration
 	pcl::SampleConsensusInitialAlignment<pcl::PointXYZRGBA, pcl::PointXYZRGBA, pcl::FPFHSignature33> scia;
 	scia.setInputSource(cloud_src);
 	scia.setInputTarget(cloud_tgt);
 	scia.setSourceFeatures(fpfhs_src);
 	scia.setTargetFeatures(fpfhs_tgt);
-	//scia.setNumberOfSamples(20);
-	//scia.setRANSACIterations(30);
-	//scia.setRANSACOutlierRejectionThreshold(targetpoint_leafsize * 10);
-	//scia.setCorrespondenceRandomness(20);
-	//scia.setCorrespondenceRandomness(10);
+	scia.setMaxCorrespondenceDistance(sourcepoint_leafsize * 2* sourcepoint_leafsize * 2);
 	pcl::PointCloud<pcl::PointXYZRGBA>::Ptr sac_result(new pcl::PointCloud<pcl::PointXYZRGBA>);
 	scia.align(*sac_result);
 	cout << "sac has converged:" << scia.hasConverged() << "  score: " << scia.getFitnessScore() << endl;
@@ -523,29 +467,23 @@ void method_sac_icp(const pcl::PointCloud<pcl::PointXYZRGBA>::Ptr source_point_c
 	cout << sac_trans << endl;
 	clock_t sac_time = clock();
 
-	//icp配准
+	//icp registration
 	pcl::IterativeClosestPoint<pcl::PointXYZRGBA, pcl::PointXYZRGBA> icp;
-	icp.setMaxCorrespondenceDistance(0.04);
-	// 最大迭代次数
+	//icp.setMaxCorrespondenceDistance(0.04);
+	icp.setMaxCorrespondenceDistance(sourcepoint_leafsize * 5);
 	icp.setMaximumIterations(50);
-	// 两次变化矩阵之间的差值
 	icp.setTransformationEpsilon(1e-10);
-	// 均方误差
 	icp.setEuclideanFitnessEpsilon(0.2);
-	//icp.setInputSource(sac_result);
 	icp.setInputSource(cloud_src);
 	icp.setInputTarget(cloud_tgt);
 	pcl::PointCloud<pcl::PointXYZRGBA> Final;
 	pcl::PointCloud<pcl::PointXYZRGBA>::Ptr icp_result(new pcl::PointCloud<pcl::PointXYZRGBA>);
 	//icp.align(Final);
-	icp.align(*icp_result,sac_trans);//提前给一个粗配准矩阵
+	icp.align(*icp_result,sac_trans);
 	cout << "icp has converged:" << icp.hasConverged() << " score: " << icp.getFitnessScore() << endl;
 	cout << icp.getFinalTransformation() << endl;
 	Eigen::Matrix4f icp_trans= icp.getFinalTransformation();
-	//registration_matrix =  icp_trans* sac_trans; //pcl::transform是矩阵右乘点云，所以先变换的矩阵在右侧
 	registration_matrix = icp_trans;
-	//if (icp.hasConverged())
-		//score = icp.getFitnessScore();
 }
 
 
@@ -574,6 +512,8 @@ void ComputeRMS(const pcl::PointCloud<pcl::PointXYZRGBA>::Ptr first_cloud, const
 
 	rms = sqrt(sums / count);
 }
+
+
 
 // -----------------------------------------------------------------------------------------------
 // ----先选取rms值最小的10个对应的TR矩阵，然后结算每个与剩余的差值，
@@ -634,12 +574,13 @@ int ComputerRelativeTR_Threshold(const vector<double> rms_vector, const vector<E
 	double translation_dif = 0.0;
 
 	// 定义旋转矩阵阈值
-	double rotation_threshold = 15;//小30度jiu
+	double rotation_threshold = 20;//小30度jiu
 	cout << "rotation_threshold:" << rotation_threshold << endl;
 	// 定义旋转平移矩阵阈值
-	double translation_threshold = pointdis * 20;
+	double translation_threshold = pointdis * 50;
 	cout << "translation_threshold:" << translation_threshold << endl;
 	// 计算每个TR与剩余TR之间的插值
+	int total_count = 0;
 	for (int m = 0; m < candidate_num; m++)
 	{
 		//定义记录小于阈值的个数的变量
@@ -660,13 +601,13 @@ int ComputerRelativeTR_Threshold(const vector<double> rms_vector, const vector<E
 				//旋转矩阵求旋转角
 				rotation_dif=fabs(acos((TR_Diff_R.trace() - 1) / 2)) * 180 / 3.14;
 				// 测试
-				//cout << "和第" << n << "个RT矩阵的旋转角度差值：" << rotation_dif << endl;
+				cout << "和第" << n << "个RT矩阵的旋转角度差值：" << rotation_dif << endl;
 
 				// 求差值TR矩阵的平移矩阵的均值
 				translation_dif= (fabs(TR_Diff(0, 3)) + fabs(TR_Diff(1, 3)) + fabs(TR_Diff(2, 3))) / 3;
 
 				// 测试
-				//cout << "和第" << n << "个RT矩阵的平移差值：" << translation_dif << endl;
+				cout << "和第" << n << "个RT矩阵的平移差值：" << translation_dif << endl;
 
 			
 
@@ -683,26 +624,30 @@ int ComputerRelativeTR_Threshold(const vector<double> rms_vector, const vector<E
 		// 显示其rms值
 	    cout << "区域对"<< regionpair[rms_min_index[m]][0]<<"和"<< regionpair[rms_min_index[m]][1] <<"的RMS值为" << rms_vector[rms_min_index[m]] << endl;
 		cout << "满足的数量：" << count << endl;
+		total_count = total_count + count;
 		count_vector.push_back(count);
 	}
 
-	// 求小于阈值数量最多对应的rms_min_index的索引
-	int count_max = -1;             // 定义一个基准
-	int count_max_index = 0;
+	// 求小于阈值数量超过均值对应的索引
+	int count_average = total_count/ candidate_num;             // 定义一个基准
+	int count_selected = 0;
+	int count_selected_index = 0;
 	for (int k = 0; k < candidate_num; k++)
 	{
-		if (count_vector[k] > count_max)
+		if (count_vector[k] > count_average)
 		{
-			count_max = count_vector[k];
-			count_max_index = k;
+			count_selected = count_vector[k];
+			count_selected_index = k;
+			break;
 		}
 	}
 	// 测试
-	cout << "最大数量：" << count_vector[count_max_index] << endl;
+	cout << "被选择的阈值数量：" << count_average << endl;
+	cout << "被选择的数量：" << count_vector[count_selected_index] << endl;
 	//similartPair[count_max_index];
 	//cout << "对应的索引：" << count_max_index << endl;
-	if (count_vector[count_max_index] > 1)
-		return rms_min_index[count_max_index];
+	if (count_vector[count_selected_index] >= 1)
+		return rms_min_index[count_selected_index];
 	else
 		return rms_min_index[0];
 }
@@ -721,7 +666,7 @@ int
 
 	//手动设置参数区
 	double sample_num = 10000;
-	double overlap = 0.4;     //重叠区域大小
+	double overlap = 0.3;     //重叠区域大小
 	int registration_type = 3; //0为完整配完整，1为部分配完整，2为部分配部分，3为未知和起始状态
 //——————————————————————————————————————————————————————	
 	//更新参数区
@@ -772,32 +717,57 @@ int
 	//——————————————————————————————————————————————————————	
 	//读取输入的两个点云
 	read_pointcloud(source_point_cloud, target_point_cloud, argc, argv);
+	clock_t registration_start = clock();
 	string pc1name = argv[1];
 	string pc2name = argv[2];
 	//计算点云密度
+		/*
 	double source_point_cloud_density = 0.0;
 	double target_point_cloud_density = 0.0;
 	double min_point_cloud_density = 0.0;
+		*/
+	//计算点云分辨率
+	double source_resolution = 0.0;
+	double target_resolution = 0.0;
+	double high_resolution = 0.0;
+	source_resolution = computeCloudResolution(source_point_cloud);
+	target_resolution = computeCloudResolution(target_point_cloud);
+	cout << "source_point_cloud点云分辨率:" << source_resolution << endl;
+	cout << "target_point_cloud点云分辨率:" << target_resolution << endl;
+	/*
 	compute_pointcloud_density(source_point_cloud, source_point_cloud_density);
 	compute_pointcloud_density(target_point_cloud, target_point_cloud_density);
 	cout << "source_point_cloud点云密度:" << source_point_cloud_density << endl;
 	cout << "target_point_cloud点云密度:" << target_point_cloud_density << endl;
 	min_point_cloud_density = min(source_point_cloud_density, target_point_cloud_density);
+	
 	cout << "选取较小的point_cloud点云密度:" << min_point_cloud_density << endl;
+	*/
+	high_resolution = max(source_resolution, target_resolution);
 	//降采样，将两个点云变成相同点云密度
 	pcl::VoxelGrid<pcl::PointXYZRGBA> src_voxel_grid;
-	src_voxel_grid.setLeafSize(min_point_cloud_density * factor, min_point_cloud_density * factor, min_point_cloud_density * factor);
+	src_voxel_grid.setLeafSize(high_resolution * factor, high_resolution * factor, high_resolution * factor);
 	//voxel_grid.setLeafSize(0.01, 0.01, 0.01);
 	src_voxel_grid.setInputCloud(source_point_cloud);
 	src_voxel_grid.filter(*source_point_cloud);
 
 	pcl::VoxelGrid<pcl::PointXYZRGBA> tgt_voxel_grid;
-	tgt_voxel_grid.setLeafSize(min_point_cloud_density * factor, min_point_cloud_density * factor, min_point_cloud_density * factor);
+	tgt_voxel_grid.setLeafSize(high_resolution * factor, high_resolution * factor, high_resolution * factor);
 	//voxel_grid.setLeafSize(0.01, 0.01, 0.01);
 	tgt_voxel_grid.setInputCloud(target_point_cloud);
 	tgt_voxel_grid.filter(*target_point_cloud);
+	/*
+	compute_pointcloud_density(source_point_cloud, source_point_cloud_density);
+	compute_pointcloud_density(target_point_cloud, target_point_cloud_density);
+	cout << "降采样后source_point_cloud点云数量:" << source_point_cloud->points.size() << "点云密度为:"<< source_point_cloud_density <<endl;
+	cout << "降采样后target_point_cloud点云数量:" << target_point_cloud->points.size() << "点云密度为:" << target_point_cloud_density << endl;
+	*/
+	source_resolution = computeCloudResolution(source_point_cloud);
+	target_resolution = computeCloudResolution(target_point_cloud);
 	cout << "降采样后source_point_cloud点云数量:" << source_point_cloud->points.size() << endl;
 	cout << "降采样后target_point_cloud点云数量:" << target_point_cloud->points.size() << endl;
+	cout << "降采样后source_point_cloud点云分辨率:" << source_resolution << endl;
+	cout << "降采样后target_point_cloud点云分辨率:" << target_resolution << endl;
 //——————————————————————————————————————————————————————	
 
 	if (registration_type == 1) {
@@ -805,79 +775,76 @@ int
 		cout << "计算出的重叠区域比例为" << overlap << endl;
 	}
 
-	int seg_nums = floor(1/overlap*5);         // 切割点云的数量，默认是11
-	cout << "根据重叠区域比例推荐使用分块数量为" << seg_nums << endl;
-	seg_nums = max(seg_nums,part_nums);
-	cout << "最终使用分块数量为" << seg_nums << endl;
-	double K_factor = overlap*seg_nums;     //分割的时候需要设置的影响因子，决定Kd树的大小
-	int sac_times = 500;        //SAC最大迭代次数
-	double thresh = 0.001;      //SAC筛选点的距离阈值
-	//int threads_num = min(omp_get_max_threads(), seg_nums);
-	//cout << "使用线程数：" << threads_num << endl;
-	//omp_set_num_threads(threads_num);
-	//omp_set_num_threads(omp_get_max_threads());
-
+	int src_seg_nums = floor(1/overlap*5);         // 切割点云的数量，默认是11
+	cout << "根据重叠区域比例推荐使用分块数量为" << src_seg_nums << endl;
+	if(part_nums!=0)
+	src_seg_nums = part_nums;
+	double K_factor = overlap* src_seg_nums;     //分割的时候需要设置的影响因子，决定Kd树的大小
+	int tgt_seg_nums = 1;
+	if ((registration_type != 0)&& (registration_type != 1)) {
+		tgt_seg_nums = ceil(double(target_point_cloud->points.size()*src_seg_nums) / double(source_point_cloud->points.size()));
+		src_seg_nums = ceil(double(source_point_cloud->points.size()*tgt_seg_nums)/ double(target_point_cloud->points.size()));
+	}
+	cout << "最终source_pointcloud分块数量为" << src_seg_nums << endl;
+	cout << "最终target_pointcloud分块数量为" << tgt_seg_nums << endl;
 
   //——————————————————————————————————————————————————————
   //显示原始点云
   boost::shared_ptr<pcl::visualization::PCLVisualizer> viewer1(new pcl::visualization::PCLVisualizer("原点云"));
   int v1(0);
   int v2(0);
-  //source点云视角
   pcl::visualization::PointCloudColorHandlerCustom<pcl::PointXYZRGBA> source_cloud_color_handler(source_point_cloud, 0, 255, 0);//柠檬绿
-  pcl::visualization::PointCloudColorHandlerCustom<pcl::PointXYZRGBA> target_cloud_color_handler(target_point_cloud, 0, 255, 0);//柠檬绿
+  pcl::visualization::PointCloudColorHandlerCustom<pcl::PointXYZRGBA> target_cloud_color_handler(target_point_cloud, 255, 0, 0);//红
   viewer1->createViewPort(0.0, 0.0, 0.5, 1.0, v1);//(Xmin,Ymin,Xmax,Ymax)设置不同视角窗口坐标
   viewer1->setBackgroundColor(255, 255, 255, v1);//设置背景色为白色
-  viewer1->addText("source_point_cloud_image", 10, 10,1.0,0.0,0.0, "v1 text", v1);
-  viewer1->addPointCloud(source_point_cloud, source_cloud_color_handler,"source_point_cloud",v1);
-  //target点云视角
+  viewer1->addText("source_point_cloud_image", 10, 30,1.0,0.0,0.0, "v1 text",v1);
+  viewer1->addPointCloud(source_point_cloud, source_cloud_color_handler,"source_point_cloud", v1);
   viewer1->createViewPort(0.5, 0.0, 1.0, 1.0, v2);
   viewer1->setBackgroundColor(255, 255, 255, v2);//设置背景色为白色
   viewer1->addText("target_point_cloud_image", 10, 10, 1.0, 0.0, 0.0, "v2 text", v2);
-  viewer1->addPointCloud(target_point_cloud, target_cloud_color_handler, "target_point_cloud",v2);
-  //viewer2->addCoordinateSystem(1.0);
- 
+  viewer1->addPointCloud(target_point_cloud, target_cloud_color_handler, "target_point_cloud", v2);
+
 //——————————————————————————————————————————————————————
   //点云分块后显示
   boost::shared_ptr<pcl::visualization::PCLVisualizer> viewer2(new pcl::visualization::PCLVisualizer("source点云分块视角"));
-  boost::shared_ptr<pcl::visualization::PCLVisualizer> viewer3(new pcl::visualization::PCLVisualizer("target点云分块视角"));
   viewer2->setBackgroundColor(255, 255, 255);//设置背景色为白色
-  viewer2->addText("seg_source_point_cloud_image,total "+ to_string(seg_nums)+"parts", 10, 10, 1.0, 0.0, 0.0);
+  viewer2->addText("seg_source_point_cloud_image,total " + to_string(src_seg_nums) + "parts", 10, 10, 1.0, 0.0, 0.0);
+  boost::shared_ptr<pcl::visualization::PCLVisualizer> viewer3(new pcl::visualization::PCLVisualizer("target点云分块视角"));
   viewer3->setBackgroundColor(255, 255, 255);//设置背景色为白色
-  viewer3->addText("seg_target_point_cloud_image,total " + to_string(seg_nums) + "parts", 10, 10, 1.0, 0.0, 0.0);
+  viewer3->addText("seg_target_point_cloud_image,total " + to_string(tgt_seg_nums) + "parts", 10, 10, 1.0, 0.0, 0.0);
   // 先进行FPS采样，得到分割点云块的中心点
   vector<int> source_sampleIndex;
   vector<int> target_sampleIndex;
-  ComputeFPS(source_point_cloud, seg_nums, source_sampleIndex);
-  ComputeFPS(target_point_cloud, seg_nums, target_sampleIndex);
+  ComputeFPS(source_point_cloud, src_seg_nums, source_sampleIndex);
+  ComputeFPS(target_point_cloud, tgt_seg_nums, target_sampleIndex);
   // 保存分割后的点云
   pcl::PointCloud<pcl::PointXYZRGBA> PointCloud;
-  vector<pcl::PointCloud<pcl::PointXYZRGBA>> NewSourceCloud(seg_nums, PointCloud);
+  vector<pcl::PointCloud<pcl::PointXYZRGBA>> NewSourceCloud(src_seg_nums, PointCloud);
   pcl::PointCloud<pcl::PointXYZRGBA> PointCloud1;
-  vector<pcl::PointCloud<pcl::PointXYZRGBA>> NewTargetCloud(seg_nums, PointCloud1);
+  vector<pcl::PointCloud<pcl::PointXYZRGBA>> NewTargetCloud(tgt_seg_nums, PointCloud1);
   // 变换后的点云
   pcl::PointCloud<pcl::PointXYZRGBA>::Ptr PointCloud2(new pcl::PointCloud<pcl::PointXYZRGBA>);
-  vector<pcl::PointCloud<pcl::PointXYZRGBA>::Ptr> TransformCloud(seg_nums*seg_nums, PointCloud2);
+  vector<pcl::PointCloud<pcl::PointXYZRGBA>::Ptr> TransformCloud(src_seg_nums*tgt_seg_nums, PointCloud2);
   // 保存转换矩阵
   Eigen::Matrix4f ransactransformation;
   Eigen::Matrix4f icptransformation;
   Eigen::Matrix4f finaltransformation;
 
   // 保存TR至向量中
-  vector<Eigen::Matrix4f> TR_vector(seg_nums*seg_nums);
+  vector<Eigen::Matrix4f> TR_vector(src_seg_nums*tgt_seg_nums);
 
   // 保存RMS值
   double rms;
   double finalrms = 0.0;
 
   // 将RMS值放入向量数组中
-  vector<double> rms_vector(seg_nums*seg_nums, -1);
+  vector<double> rms_vector(src_seg_nums*tgt_seg_nums, -1);
 
   //保存选取区域点云序号
-  vector<vector<int>> NewSourceCloudIndex(seg_nums);
-  vector<vector<int>> NewTargetCloudIndex(seg_nums);
-  vector<vector<int>> PointRegionPair(seg_nums*seg_nums);
-  int K = (int)(max(source_point_cloud->points.size(),target_point_cloud->points.size())/ seg_nums * K_factor); //每块含有的点云数量
+  vector<vector<int>> NewSourceCloudIndex(src_seg_nums);
+  vector<vector<int>> NewTargetCloudIndex(tgt_seg_nums);
+  vector<vector<int>> PointRegionPair(src_seg_nums*tgt_seg_nums);
+  int K = (int)(min(source_point_cloud->points.size() / src_seg_nums,target_point_cloud->points.size()/ tgt_seg_nums)* K_factor); //每块含有的点云数量
   //cout << "每块包含点云的数量:"<<K << endl; //这个数量其实是overlap区域点云数量
 
   //红,橙,黄,绿,青,蓝,紫,深红,深橙,金，橄榄绿
@@ -887,26 +854,17 @@ int
   double b[16] = {0,0,0,0,255,255,240,0,0,0,35,209,139,211,203,35};
   clock_t segment_start = clock();
 #pragma omp parallel for
-  for (int i = 0; i < seg_nums; i++)
+  for (int i = 0; i < src_seg_nums; i++)
   {
-	  // 测试
-	  //cout << "开始分割源点云" << endl;
-
-	  // 分割点云
-	  SegmentCloud(source_point_cloud, NewSourceCloud[i], NewSourceCloudIndex[i], source_sampleIndex[i], seg_nums, K, sample_num);
-	  //——————————————————————————————————————————————————————
-	  //实验一图
-	/*   
-	  target_sampleIndex[i] = source_sampleIndex[i];
-	  NewTargetCloudIndex[i] = NewSourceCloudIndex[i];
-	  NewTargetCloud[i] = NewSourceCloud[i];
-	*/
-	  //——————————————————————————————————————————————————————
-	 SegmentCloud(target_point_cloud, NewTargetCloud[i], NewTargetCloudIndex[i], target_sampleIndex[i], seg_nums, K, sample_num);
+	  SegmentCloud(source_point_cloud, NewSourceCloud[i], NewSourceCloudIndex[i], source_sampleIndex[i], src_seg_nums, K, sample_num);
+  }
+  for (int i = 0; i < tgt_seg_nums; i++)
+  {
+	  SegmentCloud(target_point_cloud, NewTargetCloud[i], NewTargetCloudIndex[i], target_sampleIndex[i], tgt_seg_nums, K, sample_num);
   }
   clock_t segment_end = clock();
   cout << "分割且结束,用时:" << (double)(segment_end - segment_start) / (double)CLOCKS_PER_SEC << " s" << endl;
-  for (int i = 0; i < seg_nums; i++)
+  for (int i = 0; i < src_seg_nums; i++)
   {
 
 	  //source每块区域	
@@ -917,6 +875,15 @@ int
 	  part1Indice.setIndices(index_partptr1);
 	  part1Indice.setNegative(false);                    //如果设为true, 可以提取指定index之外的点云
 	  part1Indice.filter(*pc1PartRegion);
+	  pcl::visualization::PointCloudColorHandlerCustom<pcl::PointXYZRGBA> part_source_pointcloud_color_handler(pc1PartRegion, r[i], g[i], b[i]);//不同区块给不同的颜色
+	  viewer2->addPointCloud(pc1PartRegion, part_source_pointcloud_color_handler, "source_point_cloud" + to_string(i));
+	  //viewer2->addText("part"+to_string(i)+" is "+ colorname[i], 10 + i * 50, 30, r[i]/255, g[i] / 255, b[i] / 255);
+	  viewer2->addText("part" + to_string(i), 10 + i * 50, 30, r[i] / 255, g[i] / 255, b[i] / 255);
+  }
+  cout << "显示完source点云的"<<src_seg_nums<<"个分块" << endl;
+  for (int i = 0; i < tgt_seg_nums; i++)
+  {
+
 	  //target每块区域	
 	  boost::shared_ptr<vector<int>> index_partptr2 = boost::make_shared<vector<int>>(NewTargetCloudIndex[i]);
 	  pcl::PointCloud<pcl::PointXYZRGBA>::Ptr pc2PartRegion(new pcl::PointCloud<pcl::PointXYZRGBA>);
@@ -925,95 +892,35 @@ int
 	  part2Indice.setIndices(index_partptr2);
 	  part2Indice.setNegative(false);                    //如果设为true, 可以提取指定index之外的点云
 	  part2Indice.filter(*pc2PartRegion);
-
-
-	  //pcl::visualization::PointCloudColorHandlerCustom<pcl::PointXYZRGBA> pointcloud_color_handler(255, 255, 255);//不同区块给不同的颜色
-	  pcl::visualization::PointCloudColorHandlerCustom<pcl::PointXYZRGBA> part_source_pointcloud_color_handler(pc1PartRegion,r[i], g[i], b[i]);//不同区块给不同的颜色
 	  pcl::visualization::PointCloudColorHandlerCustom<pcl::PointXYZRGBA> part_target_pointcloud_color_handler(pc2PartRegion, r[i], g[i], b[i]);//不同区块给不同的颜色
-	  viewer2->addPointCloud(pc1PartRegion, part_source_pointcloud_color_handler, "source_point_cloud" + to_string(i));
-	  //viewer2->addText("part"+to_string(i)+" is "+ colorname[i], 10 + i * 50, 30, r[i]/255, g[i] / 255, b[i] / 255);
-	  viewer2->addText("part" + to_string(i), 10 + i * 50, 30, r[i] / 255, g[i] / 255, b[i] / 255);
 	  viewer3->addPointCloud(pc2PartRegion, part_target_pointcloud_color_handler, "target_point_cloud" + to_string(i));
 	  //viewer3->addText("part"+to_string(i) + " is " + colorname[i], 10 + i * 50, 30, r[i] / 255, g[i] / 255, b[i] / 255);
 	  viewer3->addText("part" + to_string(i), 10 + i * 50, 30, r[i] / 255, g[i] / 255, b[i] / 255);
-	  // 测试
-	  //cout << "第" << i << "次循环结束" << endl << endl;
-
   }
-  //——————————————————————————————————————————————————————
-  /*
-  cout << "按Enter进行区块选择" << endl;
-  //检测键盘输入
-  int ch = 0;//检测键盘输入键值
-  while (!viewer1->wasStopped())
-  {
-	  viewer1->spinOnce(100);   //
-	  viewer2->spinOnce(100);   //
-	  viewer3->spinOnce(100);
-	  boost::this_thread::sleep(boost::posix_time::microseconds(100000));
-	  if (_kbhit()) {//如果有按键按下，则_kbhit()函数返回真
-		  ch = _getch();//使用_getch()函数获取按下的键值
-	  }
-	  if (ch == 13) { break; }//当按下Enter时停止循环，Enter键的键为13.
-  }
-  */
+  cout << "显示完target点云的" << tgt_seg_nums << "个分块" << endl;
 
   //——————————————————————————————————————————————————————
    clock_t ransac_start = clock();
   //点云分块后ransac配准
 	//——————————————————————————————————————————————————————
-   //实验一 柱状图
-   double similar_block = 0;
-   int similar_block_count = 0;
-   double similar_block_average = 0;
-   double unsimilar_block = 0;
-   int unsimilar_block_count = 0;
-   double unsimilar_block_average = 0;
+
 #pragma omp parallel for
-	   for (int i = 0; i < seg_nums; i++) {
-		   for (int j = 0; j < seg_nums; j++) {
+	   for (int i = 0; i < src_seg_nums; i++) {
+		   for (int j = 0; j < tgt_seg_nums; j++) {
 			   //ransac里面的参数考虑利用计算的点云密度进行设置以优化配准结果和欸准速度
 			   //cout << "开始ransac source点云的" << i << "部分和target点云的" << j << "部分,使用的线程为:" << omp_get_thread_num() << endl;
-			   Ransac_registration(NewSourceCloud[i].makeShared(), NewTargetCloud[j].makeShared(), TR_vector[i*seg_nums + j], rms_vector[i*seg_nums + j]);
-			   PointRegionPair[i*seg_nums + j] = { i,j };
-			   cout << "已ransac source点云的" << i << "部分和target点云的" << j << "部分,rms值为"<<rms_vector[i*seg_nums + j]<<"。使用的线程为:"<< omp_get_thread_num() << endl;
-			   if (i == j) {
-				   similar_block = similar_block + rms_vector[i*seg_nums + j];
-				   similar_block_count++;
-			}
-			   else
-			   {
-				   unsimilar_block = unsimilar_block + rms_vector[i*seg_nums + j];
-				   unsimilar_block_count++;
-			   }
+			   Ransac_registration(NewSourceCloud[i].makeShared(), NewTargetCloud[j].makeShared(), TR_vector[i*tgt_seg_nums + j], rms_vector[i*tgt_seg_nums + j]);
+			   PointRegionPair[i*tgt_seg_nums + j] = { i,j };
+			   cout << "已ransac source点云的" << i << "部分和target点云的" << j << "部分,rms值为"<<rms_vector[i*tgt_seg_nums + j]<<"。使用的线程为:"<< omp_get_thread_num() << endl;
+
 		   }
 	   }
   clock_t ransac_end = clock();
   cout << "ransac结束,用时:" << (double)(ransac_end - ransac_start) / (double)CLOCKS_PER_SEC << " s" << endl;
-  similar_block_average = similar_block/ similar_block_count;
-  unsimilar_block_average = unsimilar_block / unsimilar_block_count;
-  cout << "similar_block_average:" << similar_block_average  << endl;
-  cout << "unsimilar_block_average:" << unsimilar_block_average << endl;
-  //——————————————————————————————————————————————————————
 
-  //显示最佳结果
-  /*
-  //直接选RMS最小的组合
-  double rms_min = DBL_MAX;
-  int res_min_pair;
-  // 首先选取最小的rms值 对应的TR矩阵
-  for (int k = 0; k < TR_vector.size(); k++)
-  {
-	  if (rms_vector[k] < rms_min)
-	  {
-		  rms_min = rms_vector[k];
-		  ransactransformation = TR_vector[k];
-		  res_min_pair = k;
-	  }
-  }
- */
+  //——————————————————————————————————————————————————————
   //选择符合RT条件的RMS最小的组合
-  int res_min_pair = ComputerRelativeTR_Threshold(rms_vector, TR_vector, source_point_cloud_density,PointRegionPair);
+  int res_min_pair = ComputerRelativeTR_Threshold(rms_vector, TR_vector, high_resolution,PointRegionPair);
   double rms_min = rms_vector[res_min_pair];
   ransactransformation = TR_vector[res_min_pair];
   //点对提取
@@ -1035,18 +942,7 @@ int
   pcl::PointCloud<pcl::PointXYZRGBA>::Ptr OutCloud(new pcl::PointCloud<pcl::PointXYZRGBA>);
   cout << "pc1：" << pc1 << endl;
   cout << "pc2：" << pc2 << endl;
-  /*
-  //pcl::transformPointCloud(*source_point_cloud, *OutCloud, ransactransformation);
-  pcl::transformPointCloud(*NewSourceCloud[pc1].makeShared(), *pair1ransacCloud, ransactransformation);
-  method_icp(pair1ransacCloud, NewTargetCloud[pc2].makeShared(), pair1icpCloud, icptransformation);
-  finaltransformation =  icptransformation *ransactransformation;
-  pcl::transformPointCloud(*source_point_cloud, *OutCloud, finaltransformation);
-  */
-	  //最终点云配准结果的RMS值
-  /*
-  ComputeRMS(OutCloud, target_point_cloud, finalrms);
-  cout << "最终点云配准RMS值：" << finalrms << endl;
- */ 
+
  //TRMS最小的区域	配准前
   boost::shared_ptr<vector<int>> index_ptr1_b = boost::make_shared<vector<int>>(NewSourceCloudIndex[pc1]);
   pcl::PointCloud<pcl::PointXYZRGBA>::Ptr pc1PairRegion_b(new pcl::PointCloud<pcl::PointXYZRGBA>);
@@ -1067,9 +963,22 @@ int
   //根据相似性最高的点块对进行配准
   method_sac_icp(pc1PairRegion_b, pc2PairRegion_b, finaltransformation);
   pcl::transformPointCloud(*source_point_cloud, *OutCloud, finaltransformation);
-
-
-
+  clock_t registration_end = clock();
+  //——————————————————————————————————————————————————————
+  //求误差
+  Eigen::Matrix4f trueMatrix;
+  trueMatrix << 0.813808, -0.34201, 0.469835, 0,
+	  0.296192, 0.939696, 0.171001, 0,
+	  -0.499987, 0, 0.866033, 0,
+	  0, 0, 0, 1;
+  double Rerror = 0.0;
+  double Terror = 0.0;
+  compute_error(finaltransformation, trueMatrix, Rerror, Terror);
+  cout << "旋转误差为: " << Rerror << endl;
+  cout << "平移误差为: " << Terror << endl;
+  //——————————————————————————————————————————————————————
+  cout << "registration time: " << (double)(registration_end - registration_start) / (double)CLOCKS_PER_SEC << " s" << endl;
+  //——————————————————————————————————————————————————————
   //TRMS最小的区域	
   boost::shared_ptr<vector<int>> index_ptr1 = boost::make_shared<vector<int>>(NewSourceCloudIndex[pc1]);
   pcl::PointCloud<pcl::PointXYZRGBA>::Ptr pc1PairRegion(new pcl::PointCloud<pcl::PointXYZRGBA>);
@@ -1097,13 +1006,13 @@ int
  viewer4->addPointCloud(source_point_cloud, "source_point_cloud", v1);
  viewer4->addPointCloud(target_point_cloud, "target_point_cloud", v2);
  pcl::visualization::PointCloudColorHandlerCustom<pcl::PointXYZRGBA> sourcePairRegion_cloud_color_handler(pc1PairRegion_b, r[pc1], g[pc1], b[pc1]);//蓝色
- viewer4->addPointCloud(pc1PairRegion_b ,sourcePairRegion_cloud_color_handler, "sourcePairRegion",v1);
- viewer4->addText("seg_source_point_cloud_image,total " + to_string(seg_nums) + "parts", 10, 10, 1.0, 0.0, 0.0, "v1 text", v1);
- viewer4->addText("select part" + to_string(pc1), 10 , 30, r[pc1] / 255, g[pc1] / 255, b[pc1] / 255, "v1 select text", v1);
+ viewer4->addPointCloud(pc1PairRegion_b ,sourcePairRegion_cloud_color_handler, "sourcePairRegion", v1);
+ viewer4->addText("source_point_cloud_image,total " + to_string(src_seg_nums) + "parts", 10, 30, 1.0, 0.0, 0.0, "v1 text", v1);
+ viewer4->addText("select part" + to_string(pc1), 10 , 10, r[pc1] / 255, g[pc1] / 255, b[pc1] / 255, "v1 select text", v1);
  pcl::visualization::PointCloudColorHandlerCustom<pcl::PointXYZRGBA> targetPairRegion_cloud_color_handler(pc2PairRegion_b, r[pc2], g[pc2], b[pc2]);//黄色
- viewer4->addPointCloud(pc2PairRegion_b, targetPairRegion_cloud_color_handler, "targetPairRegion",v2);
- viewer4->addText("seg_target_point_cloud_image,total " + to_string(seg_nums) + "parts", 10, 10, 1.0, 0.0, 0.0, "v2 text", v2);
- viewer4->addText("select part" + to_string(pc2), 10 , 30, r[pc2] / 255, g[pc2] / 255, b[pc2] / 255, "v2 select text", v2);
+ viewer4->addPointCloud(pc2PairRegion_b, targetPairRegion_cloud_color_handler, "targetPairRegion", v2);
+ viewer4->addText("target_point_cloud_image,total " + to_string(tgt_seg_nums) + "parts", 10, 30, 1.0, 0.0, 0.0, "v2 text", v2);
+ viewer4->addText("select part" + to_string(pc2), 10 , 10, r[pc2] / 255, g[pc2] / 255, b[pc2] / 255, "v2 select text", v2);
  viewer4->spinOnce(100);
 
   // 显示点云测试
@@ -1119,7 +1028,8 @@ int
   //pcl::visualization::PointCloudColorHandlerCustom<pcl::PointXYZRGBA> targetPairRegion_cloud_color_handler(pc2PairRegion, 250, 0, 0);//深红
   viewer->addPointCloud(target_point_cloud, "target_point_cloud");
   viewer->addPointCloud(pc2PairRegion, best_targetPairRegion_cloud_color_handler, "targetPairRegion_cloud");
-  //——————————————————————————————————————————————————————
+
+ //——————————————————————————————————————————————————————
   //保存旋转矩阵
   //cout << pc1name << endl;
   int begin = pc2name.find_last_of('\\');
@@ -1130,171 +1040,16 @@ int
   cout << "RT矩阵保存路径为：" << ExePath << origin_transform_matrix_filepath << endl;
   std::ofstream  origin;
   origin.open(origin_transform_matrix_filepath, std::ios::app);//在文件末尾追加写入
+  cout << finaltransformation << endl;
   origin << finaltransformation << std::endl;//每次写完一个矩阵以后换行
   origin.close();
-  //——————————————————————————————————————————————————————
-  cout << "如不满意，按Enter手动进行区块选择" << endl;
-  //检测键盘输入
-  int ch = 0;//检测键盘输入键值
-  while (1)
+  while (!viewer->wasStopped())
   {
-	  //boost::this_thread::sleep(boost::posix_time::microseconds(100000));
 	  viewer->spinOnce(100);
-	  viewer1->spinOnce(100);   //
-	  viewer2->spinOnce(100);   //
+	  viewer1->spinOnce(100);
+	  viewer2->spinOnce(100);
 	  viewer3->spinOnce(100);
 	  viewer4->spinOnce(100);
-	  if (_kbhit()) {//如果有按键按下，则_kbhit()函数返回真
-		  ch = _getch();//使用_getch()函数获取按下的键值
-		  cout << ch << endl;
-	  }
-	  if (ch == 13) { break; }//当按下Enter时停止循环，Enter键的键为13.
-  }
-  //——————————————————————————————————————————————————————
-  boost::shared_ptr<pcl::visualization::PCLVisualizer> viewer5(new pcl::visualization::PCLVisualizer("手动选取的点云区域"));
-  boost::shared_ptr<pcl::visualization::PCLVisualizer> viewer6(new pcl::visualization::PCLVisualizer("我们的算法手动选区配准后源和目标点云可视化"));
-  while (1) {
-	  viewer5->close();
-	  viewer6->close();
-	  boost::shared_ptr<pcl::visualization::PCLVisualizer> viewer5(new pcl::visualization::PCLVisualizer("手动选取的点云区域"));
-	  boost::shared_ptr<pcl::visualization::PCLVisualizer> viewer6(new pcl::visualization::PCLVisualizer("我们的算法手动选区配准后源和目标点云可视化"));
-	  //——————————————————————————————————————————————————————
-	  //选取点云分块后显示
-	  string sourcepart;
-	  string targetpart;
-	  cout << "Input source point cloud part number from 0 to" << seg_nums - 1 << endl;
-	  getline(cin, sourcepart);
-	  cout << "You select source point cloud part" << sourcepart << "\n";
-	  int sourcepartnum = stoi(sourcepart);
-	  while (sourcepartnum > seg_nums - 1) {
-		  cout << "Wrong number! Input source point cloud part number from 0 to" << seg_nums - 1 << endl;
-		  getline(cin, sourcepart);
-		  sourcepartnum = stoi(sourcepart);
-		  cout << "You select source point cloud part" << sourcepart << "\n";
-	  }
-	  cout << "Input target point cloud part number from 0 to" << seg_nums - 1 << endl;
-	  getline(cin, targetpart);
-	  cout << "You select target point cloud part" << targetpart << "\n";
-	  int targetpartnum = stoi(targetpart);
-	  while (targetpartnum > seg_nums - 1) {
-		  cout << "Wrong number! Input target point cloud part number from 0 to" << seg_nums - 1 << endl;
-		  getline(cin, targetpart);
-		  targetpartnum = stoi(targetpart);
-		  cout << "You select target point cloud part" << targetpart << "\n";
-	  }
-
-	  //TRMS最小的区域	配准前
-	  boost::shared_ptr<vector<int>> manual_index_ptr1_b = boost::make_shared<vector<int>>(NewSourceCloudIndex[sourcepartnum]);
-	  pcl::PointCloud<pcl::PointXYZRGBA>::Ptr manual_pc1PairRegion_b(new pcl::PointCloud<pcl::PointXYZRGBA>);
-	  pcl::ExtractIndices<pcl::PointXYZRGBA> manual_pair1Indice_b;
-	  pair1Indice_b.setInputCloud(source_point_cloud);
-	  pair1Indice_b.setIndices(manual_index_ptr1_b);
-	  pair1Indice_b.setNegative(false);                    //如果设为true, 可以提取指定index之外的点云
-	  pair1Indice_b.filter(*manual_pc1PairRegion_b);
-
-
-	  boost::shared_ptr<vector<int>> manual_index_ptr2_b = boost::make_shared<vector<int>>(NewTargetCloudIndex[targetpartnum]);
-	  pcl::PointCloud<pcl::PointXYZRGBA>::Ptr manual_pc2PairRegion_b(new pcl::PointCloud<pcl::PointXYZRGBA>);
-	  pcl::ExtractIndices<pcl::PointXYZRGBA> manual_pair2Indice_b;
-	  pair2Indice_b.setInputCloud(target_point_cloud);
-	  pair2Indice_b.setIndices(manual_index_ptr2_b);
-	  pair2Indice_b.setNegative(false);                    //如果设为true, 可以提取指定index之外的点云
-	  pair2Indice_b.filter(*manual_pc2PairRegion_b);
-
-
-
-
-	  //boost::shared_ptr<pcl::visualization::PCLVisualizer> viewer5(new pcl::visualization::PCLVisualizer("手动选取的点云区域"));
-	  viewer5->createViewPort(0.0, 0.0, 0.5, 1.0, v1);
-	  viewer5->createViewPort(0.5, 0.0, 1.0, 1.0, v2);
-	  viewer5->setBackgroundColor(255, 255, 255, v1);//设置背景色为白色
-	  viewer5->setBackgroundColor(255, 255, 255, v2);//设置背景色为白色
-	  viewer5->addPointCloud(source_point_cloud, "source_point_cloud", v1);
-	  viewer5->addPointCloud(target_point_cloud, "target_point_cloud", v2);
-	  pcl::visualization::PointCloudColorHandlerCustom<pcl::PointXYZRGBA> manual_sourcePairRegion_cloud_color_handler(manual_pc1PairRegion_b, r[sourcepartnum], g[sourcepartnum], b[sourcepartnum]);//蓝色
-	  viewer5->addPointCloud(manual_pc1PairRegion_b, manual_sourcePairRegion_cloud_color_handler, "sourcePairRegion", v1);
-	  viewer5->addText("seg_source_point_cloud_image,total " + to_string(seg_nums) + "parts", 10, 10, 1.0, 0.0, 0.0, "v1 text", v1);
-	  viewer5->addText("select part" + sourcepart, 10, 30, r[sourcepartnum] / 255, g[sourcepartnum] / 255, b[sourcepartnum] / 255, "v1 select text", v1);
-	  pcl::visualization::PointCloudColorHandlerCustom<pcl::PointXYZRGBA> manual_targetPairRegion_cloud_color_handler(manual_pc2PairRegion_b, r[targetpartnum], g[targetpartnum], b[targetpartnum]);//黄色
-	  viewer5->addPointCloud(manual_pc2PairRegion_b, manual_targetPairRegion_cloud_color_handler, "targetPairRegion", v2);
-	  viewer5->addText("seg_target_point_cloud_image,total " + to_string(seg_nums) + "parts", 10, 10, 1.0, 0.0, 0.0, "v2 text", v2);
-	  viewer5->addText("select part" + targetpart, 10, 30, r[targetpartnum] / 255, g[targetpartnum] / 255, b[targetpartnum] / 255, "v2 select text", v2);
-	  viewer5->spinOnce(100);
-
-	  Eigen::Matrix4f manual_finaltransformation;
-	  pcl::PointCloud<pcl::PointXYZRGBA>::Ptr manual_pair1ransacCloud(new pcl::PointCloud<pcl::PointXYZRGBA>);
-	  pcl::PointCloud<pcl::PointXYZRGBA>::Ptr manual_pair1icpCloud(new pcl::PointCloud<pcl::PointXYZRGBA>);
-	  pcl::PointCloud<pcl::PointXYZRGBA>::Ptr manual_OutCloud(new pcl::PointCloud<pcl::PointXYZRGBA>);
-	  //pcl::transformPointCloud(*source_point_cloud, *OutCloud, ransactransformation);
-	  method_sac_icp(manual_pc1PairRegion_b, manual_pc2PairRegion_b, manual_finaltransformation);
-	  //pcl::transformPointCloud(*NewSourceCloud[sourcepartnum].makeShared(), *manual_pair1ransacCloud, manual_ransactransformation);
-	  //method_icp(pair1ransacCloud, NewTargetCloud[targetpartnum].makeShared(), manual_pair1icpCloud, manual_icptransformation);
-	  //manual_finaltransformation = manual_icptransformation * manual_ransactransformation;
-	  pcl::transformPointCloud(*source_point_cloud, *manual_OutCloud, manual_finaltransformation);
-	  //最终点云配准结果的RMS值
-	/*
-	ComputeRMS(OutCloud, target_point_cloud, finalrms);
-	cout << "最终点云配准RMS值：" << finalrms << endl;
-	*/
-	//TRMS最小的区域	
-	  boost::shared_ptr<vector<int>> index_manual_ptr1 = boost::make_shared<vector<int>>(NewSourceCloudIndex[sourcepartnum]);
-	  pcl::PointCloud<pcl::PointXYZRGBA>::Ptr manual_PairRegion1(new pcl::PointCloud<pcl::PointXYZRGBA>);
-	  pcl::ExtractIndices<pcl::PointXYZRGBA> manual_pair1Indice;
-	  pair1Indice.setInputCloud(manual_OutCloud);
-	  pair1Indice.setIndices(index_manual_ptr1);
-	  pair1Indice.setNegative(false);                    //如果设为true, 可以提取指定index之外的点云
-	  pair1Indice.filter(*manual_PairRegion1);
-
-
-	  boost::shared_ptr<vector<int>> index_manual_ptr2 = boost::make_shared<vector<int>>(NewTargetCloudIndex[targetpartnum]);
-	  pcl::PointCloud<pcl::PointXYZRGBA>::Ptr manual_PairRegion2(new pcl::PointCloud<pcl::PointXYZRGBA>);
-	  pcl::ExtractIndices<pcl::PointXYZRGBA> manual_pair2Indice;
-	  pair2Indice.setInputCloud(target_point_cloud);
-	  pair2Indice.setIndices(index_manual_ptr2);
-	  pair2Indice.setNegative(false);                    //如果设为true, 可以提取指定index之外的点云
-	  pair2Indice.filter(*manual_PairRegion2);
-
-	  // 显示点云测试
-	 //boost::shared_ptr<pcl::visualization::PCLVisualizer> viewer6(new pcl::visualization::PCLVisualizer("我们的算法手动选区配准后源和目标点云可视化"));
-	  viewer6->setBackgroundColor(255, 255, 255);//设置背景色为白色
-	  //pcl::visualization::PointCloudColorHandlerCustom<pcl::PointXYZRGBA> source_cloud_color_handler(OutCloud, 0, 255, 0);//柠檬绿
-	  viewer6->addText("source cloud select part" + to_string(sourcepartnum), 10, 10, r[sourcepartnum] / 255, g[sourcepartnum] / 255, b[sourcepartnum] / 255);
-	  pcl::visualization::PointCloudColorHandlerCustom<pcl::PointXYZRGBA> manual_sourcePairRegion_resultcloud_color_handler(manual_PairRegion1, r[sourcepartnum], g[sourcepartnum], b[sourcepartnum]);
-	  viewer6->addPointCloud(manual_OutCloud, "source_point_cloud");
-	  viewer6->addPointCloud(manual_PairRegion1, manual_sourcePairRegion_resultcloud_color_handler, "manual_PairRegion1_cloud");
-	  viewer6->addText("target cloud select part" + to_string(targetpartnum), 10, 30, r[targetpartnum] / 255, g[targetpartnum] / 255, b[targetpartnum] / 255);
-	  pcl::visualization::PointCloudColorHandlerCustom<pcl::PointXYZRGBA> manual_targetPairRegion_resultcloud_color_handler(manual_PairRegion2, r[targetpartnum], g[targetpartnum], b[targetpartnum]);
-	  //pcl::visualization::PointCloudColorHandlerCustom<pcl::PointXYZRGBA> targetPairRegion_cloud_color_handler(targetpartnum PairRegion, 250, 0, 0);//深红
-	  viewer6->addPointCloud(target_point_cloud, "target_point_cloud");
-	  viewer6->addPointCloud(manual_PairRegion2, manual_targetPairRegion_resultcloud_color_handler, "manual_PairRegion2_cloud");
- 
-	  //——————————————————————————————————————————————————————
-	  //保存旋转矩阵
-	  string transform_matrix_filepath = pc1name.substr(0,pc1name.size()-4)+"_part"+ sourcepart+"_"+ pc2name.substr(begin + 1, pc2name.size() - 4) + "_part" + targetpart+ ".txt";
-	  std::ofstream fout;
-	  fout.open(transform_matrix_filepath, std::ios::app);//在文件末尾追加写入
-	  fout << manual_finaltransformation << std::endl;//每次写完一个矩阵以后换行
-	  fout.close();
-	  //——————————————————————————————————————————————————————
-	  int ch = 0;//检测键盘输入键值
-	  cout << "如不满意，按Enter手动进行区块选择" << endl;
-	  while (!viewer->wasStopped())
-	  {
-		  //cout << "如不满意，按Enter手动进行区块选择" << endl;
-		  viewer->spinOnce(100);
-		  viewer1->spinOnce(100);   //
-		  viewer2->spinOnce(100);   //
-		  viewer3->spinOnce(100);
-		  viewer4->spinOnce(100);
-		  viewer5->spinOnce(100);
-		  viewer6->spinOnce(100);
-		  //boost::this_thread::sleep(boost::posix_time::microseconds(100000));
-		  //cout << ch << endl;
-		  if (_kbhit()) {//如果有按键按下，则_kbhit()函数返回真
-			  ch = _getch();//使用_getch()函数获取按下的键值
-		  }
-		  if (ch == 13) { break; }//当按下Enter时停止循环，Enter键的键为13.
-	  }
   }
  return (0);
 }
