@@ -91,6 +91,22 @@ void read_pointcloud(const pcl::PointCloud<pcl::PointXYZRGBA>::Ptr source_point_
 	cout << "target_point_cloud size : " << target_point_cloud->points.size() << endl;
 }
 
+//save as ply
+void savePointCloud(pcl::PointCloud<pcl::PointXYZRGBA>::Ptr cloud, std::string outpath)
+{
+	std::cerr << "save path is :" << outpath << endl;
+	//繍string隠贋揃抄廬葎char*
+	char *path = new char[outpath.size() + 1];
+	strcpy(path, outpath.c_str());
+	//std::cerr << "Path is : " << path << " ." << std::endl;
+
+	//亟竃泣堝夕
+	pcl::PLYWriter writer;
+	writer.write(path, *cloud, true);
+	//std::cerr << "PointCloud has : " << cloud->width * cloud->height << " data points." << std::endl;
+}
+
+
 //Calculate point cloud resolution
 double
 computeCloudResolution(const pcl::PointCloud<pcl::PointXYZRGBA>::Ptr cloud)
@@ -388,9 +404,9 @@ void Ransac_registration(const pcl::PointCloud<pcl::PointXYZRGBA>::Ptr source_po
 void method_sac_icp(const pcl::PointCloud<pcl::PointXYZRGBA>::Ptr source_point_cloud, const pcl::PointCloud<pcl::PointXYZRGBA>::Ptr target_point_cloud,  Eigen::Matrix4f &registration_matrix)
 {
 	double sourcepoint_leafsize;
-	sourcepoint_leafsize = computeCloudResolution(source_point_cloud)*5;
+	sourcepoint_leafsize = computeCloudResolution(source_point_cloud);//*5
 	double targetpoint_leafsize;
-	targetpoint_leafsize = computeCloudResolution(target_point_cloud)*5;
+	targetpoint_leafsize = computeCloudResolution(target_point_cloud);
 	vector<int> indices_src; //Save the index of the removed point
 	pcl::removeNaNFromPointCloud(*source_point_cloud, *source_point_cloud, indices_src);
 	//cout << "remove *source_point_cloud nan" << endl;
@@ -951,6 +967,7 @@ int
   viewer->addPointCloud(pc2PairRegion, best_targetPairRegion_cloud_color_handler, "targetPairRegion_cloud");
 
  //！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！
+
   //Save transform matrix
   //cout << pc1name << endl;
   int begin = pc2name.find_last_of('\\');
@@ -963,6 +980,8 @@ int
   cout << finaltransformation << endl;
   origin << finaltransformation << std::endl;//New line after each matrix is written
   origin.close();
+  //savePointCloud
+  savePointCloud(OutCloud,"output.ply");
   while (!viewer->wasStopped())
   {
 	  viewer->spinOnce(100);
