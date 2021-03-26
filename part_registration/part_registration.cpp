@@ -400,9 +400,11 @@ void Ransac_registration(const pcl::PointCloud<pcl::PointXYZRGBA>::Ptr source_po
 	double dis;
 	if (scia.hasConverged()) {
 		dis = scia.getFitnessScore();
-		//cout << "dis:" << dis << endl;
-		//cout << "sourcepoint_leafsize:" << sourcepoint_leafsize << endl;
-		double value = ( 0.05*log10(dis*dis / sourcepoint_leafsize));
+		cout << "dis:" << dis << endl;
+		cout << "sourcepoint_leafsize:" << sourcepoint_leafsize << endl;
+		double factor_a = 2; //这个值越大区分度越大
+		double factor_b = 1.5;  //这个值越大整体值越小
+		double value = (factor_a*log10(factor_b*dis / (sourcepoint_leafsize*sourcepoint_leafsize)));
 		//cout << "value:" << value << endl;
 		score = 1 / (1 + pow(2.718, value));
 	}
