@@ -397,8 +397,16 @@ void Ransac_registration(const pcl::PointCloud<pcl::PointXYZRGBA>::Ptr source_po
 	//cout << "sac time:" << (double)(sac_end - sac_start) / (double)CLOCKS_PER_SEC << " s" << endl;
 	ransac_end = clock();
 	//cout << "ransac time:" << (double)(ransac_end - ransac_start) / (double)CLOCKS_PER_SEC << " s" << endl;
-	if (scia.hasConverged())
-		score = scia.getFitnessScore();
+	double dis;
+	if (scia.hasConverged()) {
+		dis = scia.getFitnessScore();
+		//cout << "dis:" << dis << endl;
+		//cout << "sourcepoint_leafsize:" << sourcepoint_leafsize << endl;
+		double value = ( 0.05*log10(dis*dis / sourcepoint_leafsize));
+		//cout << "value:" << value << endl;
+		score = 1 / (1 + pow(2.718, value));
+	}
+		
 }
 
 void method_sac_icp(const pcl::PointCloud<pcl::PointXYZRGBA>::Ptr source_point_cloud, const pcl::PointCloud<pcl::PointXYZRGBA>::Ptr target_point_cloud,  Eigen::Matrix4f &registration_matrix)
@@ -523,7 +531,7 @@ int ComputerRelativeTR_Threshold(const vector<double> rms_vector, const vector<E
 	for (int j = 0; j < rms_vector.size(); j++)
 		rms_copy_index.push_back(j);
 
-	vector<int> rms_min_index;              
+	vector<int> sim_max_index;              
 	Eigen::Matrix4f TR_Diff;                
 	Eigen::Matrix3f TR_Diff_3;
 	int candidate_num = min(int(ceil(rms_vector.size()*0.5)), 10);
@@ -533,18 +541,18 @@ int ComputerRelativeTR_Threshold(const vector<double> rms_vector, const vector<E
 
 	for (int i = 0; i < candidate_num; i++)        
 	{
-		double rms_Min = DBL_MAX;          
+		double sim_Max = DBL_MIN;          
 		int Min_Index = 0;
 		for (int j = 0; j < rms_copy.size(); j++)     
 		{
-			if (rms_copy[j] < rms_Min)
+			if (rms_copy[j] > sim_Max)
 			{
-				rms_Min = rms_copy[j];
+				sim_Max = rms_copy[j];
 				Min_Index = j;
 			}
 		}
 
-		rms_min_index.push_back(rms_copy_index[Min_Index]);
+		sim_max_index.push_back(rms_copy_index[Min_Index]);
 
 		// Delete the current minimum
 		vector<double>::iterator iter1 = rms_copy.begin() + Min_Index;
@@ -576,7 +584,7 @@ int ComputerRelativeTR_Threshold(const vector<double> rms_vector, const vector<E
 			if (n != m)
 			{
 				//Calculate the transformation matrix between two registration matrices
-				TR_Diff = TR_vector[rms_min_index[m]].inverse() * (TR_vector[rms_min_index[n]]);
+				TR_Diff = TR_vector[sim_max_index[m]].inverse() * (TR_vector[sim_max_index[n]]);
 				Eigen::Matrix3f TR_Diff_R;
 				TR_Diff_R = TR_Diff.block<3, 3>(0, 0);
 				//Rotation matrix to find the rotation angle
@@ -600,7 +608,7 @@ int ComputerRelativeTR_Threshold(const vector<double> rms_vector, const vector<E
 		}
 		// ²âÊÔ
 		// ÏÔÊ¾ÆärmsÖµ
-	    cout << "The similarity between block pair"<< regionpair[rms_min_index[m]][0]<<" and "<< regionpair[rms_min_index[m]][1] <<"is" << rms_vector[rms_min_index[m]] << endl;
+	    cout << "The similarity between block pair"<< regionpair[sim_max_index[m]][0]<<" and "<< regionpair[sim_max_index[m]][1] <<"is" << rms_vector[sim_max_index[m]] << endl;
 		cout << "The count of approximate matrices£º" << count << endl;
 		total_count = total_count + count;
 		count_vector.push_back(count);
@@ -621,9 +629,9 @@ int ComputerRelativeTR_Threshold(const vector<double> rms_vector, const vector<E
 	cout << "The average of the approximate matrix£º" << count_average << endl;
 	cout << "Number of approximate matrices selected£º" << count_vector[count_selected_index] << endl;
 	if (count_vector[count_selected_index] >= 1)
-		return rms_min_index[count_selected_index];
+		return sim_max_index[count_selected_index];
 	else
-		return rms_min_index[0];
+		return sim_max_index[0];
 }
 
 int
@@ -865,7 +873,7 @@ int
   //¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª
   //Use the TAM module to find the appropriate block pair
   int res_min_pair = ComputerRelativeTR_Threshold(rms_vector, TR_vector, high_resolution,PointRegionPair);
-  double rms_min = rms_vector[res_min_pair];
+  double sim_Max = rms_vector[res_min_pair];
   ransactransformation = TR_vector[res_min_pair];
   //Extract block pair
   int pc1;
@@ -876,7 +884,7 @@ int
   pc2 = pcpair[1];
 
 
-  cout << "The similarity of the output matrix£º" << rms_min << endl;
+  cout << "The similarity of the output matrix£º" << sim_Max << endl;
   pcl::PointCloud<pcl::PointXYZRGBA>::Ptr pair1ransacCloud(new pcl::PointCloud<pcl::PointXYZRGBA>);
   pcl::PointCloud<pcl::PointXYZRGBA>::Ptr pair1icpCloud(new pcl::PointCloud<pcl::PointXYZRGBA>);
   pcl::PointCloud<pcl::PointXYZRGBA>::Ptr OutCloud(new pcl::PointCloud<pcl::PointXYZRGBA>);
