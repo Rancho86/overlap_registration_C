@@ -106,6 +106,30 @@ void savePointCloud(pcl::PointCloud<pcl::PointXYZRGBA>::Ptr cloud, std::string o
 	//std::cerr << "PointCloud has : " << cloud->width * cloud->height << " data points." << std::endl;
 }
 
+void compute_pointcloud_volume(const pcl::PointCloud<pcl::PointXYZRGBA>::Ptr point_cloud, double &volume) {
+	int aa = point_cloud->points.size();
+	double qxmax = point_cloud->points[0].x;
+	double qxmin = point_cloud->points[0].x;
+	double qymax = point_cloud->points[0].y;
+	double qymin = point_cloud->points[0].y;
+	double qzmax = point_cloud->points[0].z;
+	double qzmin = point_cloud->points[0].z;
+	for (int i = 0; i < aa - 1; i++)
+	{
+		double qx = point_cloud->points[i].x;
+		qxmax = max(qx, qxmax);
+		qxmin = min(qx, qxmin);
+		double qy = point_cloud->points[i].y;
+		qymax = max(qy, qymax);
+		qymin = min(qy, qymin);
+		double qz = point_cloud->points[i].z;
+		qzmax = max(qz, qzmax);
+		qzmin = min(qz, qzmin);
+
+	}
+	volume = (qxmax - qxmin)*(qymax - qymin)*(qzmax - qzmin);
+}
+
 
 //Calculate point cloud resolution
 double
@@ -280,6 +304,7 @@ void SegmentCloud(const pcl::PointCloud<pcl::PointXYZRGBA>::Ptr cloud, pcl::Poin
 		extract.setIndices(pointIdxRadiusSearch_ptr);
 		extract.setNegative(false);                    //If set to true, point clouds outside the specified index can be extracted
 		extract.filter(*cloud_ptr);
+		cout << "cloud_ptr->points.size()"<< cloud_ptr->points.size() << endl;
 		//newcloud = *cloud_ptr;
 	}
 
@@ -291,6 +316,43 @@ void SegmentCloud(const pcl::PointCloud<pcl::PointXYZRGBA>::Ptr cloud, pcl::Poin
 	seg_stop = clock();
 	//cout << "Time to obtain the point cloud：" << seg_stop - seg_start << "s" << endl;
 }
+
+void SegmentCloud1(const pcl::PointCloud<pcl::PointXYZRGBA>::Ptr cloud, pcl::PointCloud<pcl::PointXYZRGBA> &newcloud, vector<int> &pointIdxNKNSearch, const int index, const int seg_nums, const float K, const int sample_num)
+{
+	clock_t  seg_start, seg_stop;
+	seg_start = clock();
+	pcl::KdTreeFLANN<pcl::PointXYZRGBA> kdtree;
+	kdtree.setInputCloud(cloud);
+	pcl::PointXYZRGBA searchPoint = cloud->points[index];
+
+	pcl::PointCloud<pcl::PointXYZRGBA>::Ptr cloud_ptr(new pcl::PointCloud < pcl::PointXYZRGBA>);
+	pcl::ExtractIndices<pcl::PointXYZRGBA> extract;
+
+	//std::vector<int> pointIdxRadiusSearch;
+	std::vector<float> pointRadiusSquaredDistance;
+	float radius = K;
+
+	if (kdtree.radiusSearch(searchPoint, radius, pointIdxNKNSearch, pointRadiusSquaredDistance) > 0)
+	{
+		boost::shared_ptr<vector<int>> pointIdxRadiusSearch_ptr = boost::make_shared<vector<int>>(pointIdxNKNSearch);
+		// Extract point cloud based on index
+		extract.setInputCloud(cloud);
+		extract.setIndices(pointIdxRadiusSearch_ptr);
+		extract.setNegative(false);                    //If set to true, point clouds outside the specified index can be extracted
+		extract.filter(*cloud_ptr);
+		cout << "cloud_ptr->points.size()" << cloud_ptr->points.size() << endl;
+		//newcloud = *cloud_ptr;
+	}
+	pcl::PointCloud<pcl::PointXYZRGBA>::Ptr newcloud_s(new pcl::PointCloud < pcl::PointXYZRGBA>);
+	newcloud_s = newcloud.makeShared();
+	if (cloud_ptr->points.size() > sample_num)
+		DownSample(cloud_ptr, sample_num);
+	newcloud = *cloud_ptr;
+	seg_stop = clock();
+	//cout << "Time to obtain the point cloud：" << seg_stop - seg_start << "s" << endl;
+}
+
+
 
 // ---------------------------------------------------------------------------------------
 // ------------------------------- Use sac-ia to calculate similarity and transformation matrix --------------------------------------------
@@ -654,6 +716,7 @@ int
 	int registration_type = 2; //0 means 'whole to whole', 1 means 'part to whole', other means 'part to part'
 	int inputnum = 3;
 	int part_nums = 0;
+	int seg_method = 0;
 	double factor = 0.2;  //The larger the value, the greater the downsampling force, resulting in fewer points remaining after downsampling
 //——————————————————————————————————————————————————————		
 	//Update parameter area
@@ -673,6 +736,15 @@ int
 		else if (!strcmp(argv[inputnum], "-f")) {
 			factor = atof(argv[++inputnum]);
 			cout << "The impact factor during downsampling is" << factor << endl;
+		}
+		else if (!strcmp(argv[inputnum], "-sm")) {
+			seg_method = atof(argv[++inputnum]);
+			if (seg_method == 0) {
+				cout << "seg is according to point number" << endl;
+			}
+			else if (seg_method == 1) {
+				cout << "seg is according to distance" << endl;
+			}
 		}
 		else if (!strcmp(argv[inputnum], "-r")) {
 			registration_type = atoi(argv[++inputnum]);
@@ -814,14 +886,29 @@ int
   double g[16] = {0,165,255,255,255,0,32,0,127,215,142,206,61,0,192,35};
   double b[16] = {0,0,0,0,255,255,240,0,0,0,35,209,139,211,203,35};
   clock_t segment_start = clock();
+  double seg_radis = 0.0;
+  double target_volume = 0.0;
+  double source_volume = 0.0;
+  //compute pointcloud volume
+  compute_pointcloud_volume(source_point_cloud, source_volume);
+  compute_pointcloud_volume(target_point_cloud, target_volume);
+  seg_radis = pow(min(source_volume / src_seg_nums, target_volume / tgt_seg_nums),1.0/3);
 #pragma omp parallel for
   for (int i = 0; i < src_seg_nums; i++)
   {
-	  SegmentCloud(source_point_cloud, NewSourceCloud[i], NewSourceCloudIndex[i], source_sampleIndex[i], src_seg_nums, K, sample_num);
+	  if(seg_method==0)
+		  SegmentCloud(source_point_cloud, NewSourceCloud[i], NewSourceCloudIndex[i], source_sampleIndex[i], src_seg_nums, K, sample_num);  //按照数量分块
+	  else 
+		  SegmentCloud1(source_point_cloud, NewSourceCloud[i], NewSourceCloudIndex[i], source_sampleIndex[i], src_seg_nums, seg_radis, sample_num); //按照半径分块
+	  
+		  
   }
   for (int i = 0; i < tgt_seg_nums; i++)
   {
-	  SegmentCloud(target_point_cloud, NewTargetCloud[i], NewTargetCloudIndex[i], target_sampleIndex[i], tgt_seg_nums, K, sample_num);
+	  if (seg_method == 0)
+		  SegmentCloud(target_point_cloud, NewTargetCloud[i], NewTargetCloudIndex[i], target_sampleIndex[i], tgt_seg_nums, K, sample_num);  //按照数量分块
+	  else
+		  SegmentCloud1(target_point_cloud, NewTargetCloud[i], NewTargetCloudIndex[i], target_sampleIndex[i], tgt_seg_nums, seg_radis, sample_num); //按照半径分块
   }
   clock_t segment_end = clock();
   cout << "Finish point cloud block, time:" << (double)(segment_end - segment_start) / (double)CLOCKS_PER_SEC << " s" << endl;
@@ -969,7 +1056,8 @@ int
   viewer->setBackgroundColor(255, 255, 255);
   viewer->addText("source cloud select part" + to_string(pc1), 10, 10, r[pc1] / 255, g[pc1] / 255, b[pc1] / 255);
   pcl::visualization::PointCloudColorHandlerCustom<pcl::PointXYZRGBA> best_sourcePairRegion_cloud_color_handler(pc1PairRegion, r[pc1], g[pc1], b[pc1]);
-  viewer->addPointCloud(OutCloud,  "source_point_cloud");
+  pcl::visualization::PointCloudColorHandlerCustom<pcl::PointXYZRGBA> OutCloud_color_handler(OutCloud, 0,0, 0);
+  viewer->addPointCloud(OutCloud, OutCloud_color_handler,  "source_point_cloud");
   viewer->addPointCloud(pc1PairRegion, best_sourcePairRegion_cloud_color_handler, "sourcePairRegion");
   viewer->addText("target cloud select part" + to_string(pc2), 10, 30, r[pc2] / 255, g[pc2] / 255, b[pc2] / 255);
   pcl::visualization::PointCloudColorHandlerCustom<pcl::PointXYZRGBA> best_targetPairRegion_cloud_color_handler(pc2PairRegion, r[pc2], g[pc2], b[pc2]);
